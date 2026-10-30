@@ -1,0 +1,164 @@
+images=150 scale=0.75 jobs=16
+target ssim=0.9728
+libwebp        q=40  avgKB=  13.74  ssim=0.9314  encMs=  97.3
+libwebp        q=50  avgKB=  15.82  ssim=0.9418  encMs= 107.9
+libwebp        q=60  avgKB=  17.90  ssim=0.9500  encMs= 107.5
+libwebp        q=70  avgKB=  20.23  ssim=0.9575  encMs= 111.8
+libwebp        q=75  avgKB=  21.52  ssim=0.9608  encMs= 108.8
+libwebp        q=80  avgKB=  26.22  ssim=0.9705  encMs= 108.5
+libwebp        q=85  avgKB=  32.42  ssim=0.9789  encMs= 108.2
+libwebp        q=90  avgKB=  42.35  ssim=0.9868  encMs= 112.6
+libwebp        q=95  avgKB=  59.61  ssim=0.9931  encMs= 110.5
+lw:m0          q=40  avgKB=  17.96  ssim=0.9296  encMs= 104.0
+lw:m0          q=50  avgKB=  20.28  ssim=0.9393  encMs= 106.8
+lw:m0          q=60  avgKB=  22.62  ssim=0.9476  encMs= 105.7
+lw:m0          q=70  avgKB=  25.03  ssim=0.9551  encMs= 106.7
+lw:m0          q=75  avgKB=  26.64  ssim=0.9587  encMs= 111.1
+lw:m0          q=80  avgKB=  30.99  ssim=0.9676  encMs= 112.1
+lw:m0          q=85  avgKB=  37.78  ssim=0.9763  encMs= 112.0
+lw:m0          q=90  avgKB=  45.06  ssim=0.9846  encMs= 113.5
+lw:m0          q=95  avgKB=  61.91  ssim=0.9914  encMs= 112.0
+lw:m1          q=40  avgKB=  16.96  ssim=0.9295  encMs= 110.2
+lw:m1          q=50  avgKB=  19.16  ssim=0.9392  encMs= 113.5
+lw:m1          q=60  avgKB=  21.39  ssim=0.9476  encMs= 115.4
+lw:m1          q=70  avgKB=  23.69  ssim=0.9551  encMs= 117.5
+lw:m1          q=75  avgKB=  25.21  ssim=0.9587  encMs= 115.3
+lw:m1          q=80  avgKB=  29.34  ssim=0.9676  encMs= 118.6
+lw:m1          q=85  avgKB=  35.74  ssim=0.9763  encMs= 117.3
+lw:m1          q=90  avgKB=  43.39  ssim=0.9846  encMs= 114.8
+lw:m1          q=95  avgKB=  59.54  ssim=0.9914  encMs= 119.6
+lw:m2          q=40  avgKB=  14.48  ssim=0.9307  encMs= 123.1
+lw:m2          q=50  avgKB=  16.57  ssim=0.9407  encMs= 126.8
+lw:m2          q=60  avgKB=  18.64  ssim=0.9488  encMs= 124.1
+lw:m2          q=70  avgKB=  20.95  ssim=0.9559  encMs= 119.6
+lw:m2          q=75  avgKB=  22.24  ssim=0.9591  encMs= 125.5
+lw:m2          q=80  avgKB=  26.91  ssim=0.9686  encMs= 125.4
+lw:m2          q=85  avgKB=  33.02  ssim=0.9770  encMs= 129.7
+lw:m2          q=90  avgKB=  42.55  ssim=0.9849  encMs= 120.3
+lw:m2          q=95  avgKB=  59.16  ssim=0.9917  encMs= 124.5
+lw:m3          q=40  avgKB=  13.72  ssim=0.9311  encMs= 126.2
+lw:m3          q=50  avgKB=  15.80  ssim=0.9415  encMs= 130.9
+lw:m3          q=60  avgKB=  17.88  ssim=0.9498  encMs= 120.0
+lw:m3          q=70  avgKB=  20.20  ssim=0.9573  encMs= 127.8
+lw:m3          q=75  avgKB=  21.50  ssim=0.9607  encMs= 141.4
+lw:m3          q=80  avgKB=  26.19  ssim=0.9704  encMs= 135.7
+lw:m3          q=85  avgKB=  32.38  ssim=0.9788  encMs= 140.3
+lw:m3          q=90  avgKB=  42.29  ssim=0.9867  encMs= 138.1
+lw:m3          q=95  avgKB=  59.54  ssim=0.9931  encMs= 136.5
+lw:m5          q=40  avgKB=  13.28  ssim=0.9280  encMs= 129.6
+lw:m5          q=50  avgKB=  15.30  ssim=0.9388  encMs= 135.6
+lw:m5          q=60  avgKB=  17.33  ssim=0.9474  encMs= 135.7
+lw:m5          q=70  avgKB=  19.61  ssim=0.9552  encMs= 133.5
+lw:m5          q=75  avgKB=  20.88  ssim=0.9588  encMs= 138.5
+lw:m5          q=80  avgKB=  25.51  ssim=0.9687  encMs= 134.7
+lw:m5          q=85  avgKB=  31.54  ssim=0.9773  encMs= 137.8
+lw:m5          q=90  avgKB=  41.41  ssim=0.9856  encMs= 145.9
+lw:m5          q=95  avgKB=  58.27  ssim=0.9923  encMs= 141.9
+lw:m6          q=40  avgKB=  12.82  ssim=0.9267  encMs= 145.9
+lw:m6          q=50  avgKB=  14.81  ssim=0.9375  encMs= 149.8
+lw:m6          q=60  avgKB=  16.82  ssim=0.9464  encMs= 143.9
+lw:m6          q=70  avgKB=  19.08  ssim=0.9543  encMs= 153.4
+lw:m6          q=75  avgKB=  20.35  ssim=0.9580  encMs= 154.0
+lw:m6          q=80  avgKB=  24.96  ssim=0.9683  encMs= 156.9
+lw:m6          q=85  avgKB=  31.02  ssim=0.9772  encMs= 157.9
+lw:m6          q=90  avgKB=  40.88  ssim=0.9858  encMs= 163.2
+lw:m6          q=95  avgKB=  57.63  ssim=0.9926  encMs= 166.4
+lw:sns0        q=40  avgKB=  14.77  ssim=0.9321  encMs= 131.3
+lw:sns0        q=50  avgKB=  16.79  ssim=0.9420  encMs= 137.7
+lw:sns0        q=60  avgKB=  18.48  ssim=0.9484  encMs= 139.9
+lw:sns0        q=70  avgKB=  20.98  ssim=0.9558  encMs= 137.5
+lw:sns0        q=75  avgKB=  21.97  ssim=0.9579  encMs= 138.4
+lw:sns0        q=80  avgKB=  27.19  ssim=0.9690  encMs= 136.4
+lw:sns0        q=85  avgKB=  32.31  ssim=0.9762  encMs= 139.3
+lw:sns0        q=90  avgKB=  41.19  ssim=0.9849  encMs= 140.7
+lw:sns0        q=95  avgKB=  57.34  ssim=0.9925  encMs= 146.4
+lw:sns100      q=40  avgKB=  14.22  ssim=0.9307  encMs= 124.7
+lw:sns100      q=50  avgKB=  16.53  ssim=0.9427  encMs= 133.4
+lw:sns100      q=60  avgKB=  18.92  ssim=0.9524  encMs= 132.9
+lw:sns100      q=70  avgKB=  21.48  ssim=0.9598  encMs= 131.9
+lw:sns100      q=75  avgKB=  22.82  ssim=0.9632  encMs= 136.7
+lw:sns100      q=80  avgKB=  27.74  ssim=0.9725  encMs= 137.6
+lw:sns100      q=85  avgKB=  34.49  ssim=0.9807  encMs= 138.6
+lw:sns100      q=90  avgKB=  44.55  ssim=0.9880  encMs= 138.0
+lw:sns100      q=95  avgKB=  60.34  ssim=0.9935  encMs= 137.6
+lw:seg1        q=40  avgKB=  14.79  ssim=0.9311  encMs= 136.3
+lw:seg1        q=50  avgKB=  16.94  ssim=0.9409  encMs= 134.5
+lw:seg1        q=60  avgKB=  18.63  ssim=0.9472  encMs= 134.7
+lw:seg1        q=70  avgKB=  21.21  ssim=0.9548  encMs= 131.0
+lw:seg1        q=75  avgKB=  22.25  ssim=0.9575  encMs= 133.9
+lw:seg1        q=80  avgKB=  27.77  ssim=0.9687  encMs= 138.6
+lw:seg1        q=85  avgKB=  33.52  ssim=0.9761  encMs= 139.0
+lw:seg1        q=90  avgKB=  44.50  ssim=0.9849  encMs= 134.3
+lw:seg1        q=95  avgKB=  63.73  ssim=0.9925  encMs= 135.6
+lw:f0          q=40  avgKB=  13.74  ssim=0.9277  encMs= 157.7
+lw:f0          q=50  avgKB=  15.82  ssim=0.9390  encMs= 150.1
+lw:f0          q=60  avgKB=  17.90  ssim=0.9480  encMs= 150.3
+lw:f0          q=70  avgKB=  20.22  ssim=0.9562  encMs= 145.9
+lw:f0          q=75  avgKB=  21.52  ssim=0.9598  encMs= 150.4
+lw:f0          q=80  avgKB=  26.22  ssim=0.9700  encMs= 139.4
+lw:f0          q=85  avgKB=  32.42  ssim=0.9788  encMs= 136.3
+lw:f0          q=90  avgKB=  42.35  ssim=0.9868  encMs= 139.5
+lw:f0          q=95  avgKB=  59.61  ssim=0.9931  encMs= 141.9
+lw:nostrong    q=40  avgKB=  13.74  ssim=0.9304  encMs= 144.8
+lw:nostrong    q=50  avgKB=  15.82  ssim=0.9409  encMs= 143.4
+lw:nostrong    q=60  avgKB=  17.90  ssim=0.9493  encMs= 141.4
+lw:nostrong    q=70  avgKB=  20.23  ssim=0.9569  encMs= 147.7
+lw:nostrong    q=75  avgKB=  21.52  ssim=0.9602  encMs= 143.2
+lw:nostrong    q=80  avgKB=  26.22  ssim=0.9700  encMs= 145.3
+lw:nostrong    q=85  avgKB=  32.42  ssim=0.9785  encMs= 140.3
+lw:nostrong    q=90  avgKB=  42.35  ssim=0.9865  encMs= 140.5
+lw:nostrong    q=95  avgKB=  59.61  ssim=0.9931  encMs= 161.3
+lw:af          q=40  avgKB=  13.74  ssim=0.9326  encMs= 259.0
+lw:af          q=50  avgKB=  15.82  ssim=0.9428  encMs= 163.5
+lw:af          q=60  avgKB=  17.90  ssim=0.9511  encMs= 171.6
+lw:af          q=70  avgKB=  20.23  ssim=0.9584  encMs= 157.2
+lw:af          q=75  avgKB=  21.52  ssim=0.9617  encMs= 203.2
+lw:af          q=80  avgKB=  26.22  ssim=0.9711  encMs= 168.6
+lw:af          q=85  avgKB=  32.42  ssim=0.9793  encMs= 188.9
+lw:af          q=90  avgKB=  42.35  ssim=0.9869  encMs= 166.2
+lw:af          q=95  avgKB=  59.61  ssim=0.9931  encMs= 148.4
+lw:sharpyuv    q=40  avgKB=  14.16  ssim=0.9316  encMs= 137.2
+lw:sharpyuv    q=50  avgKB=  16.39  ssim=0.9418  encMs= 139.8
+lw:sharpyuv    q=60  avgKB=  18.61  ssim=0.9500  encMs= 148.6
+lw:sharpyuv    q=70  avgKB=  21.07  ssim=0.9574  encMs= 142.1
+lw:sharpyuv    q=75  avgKB=  22.48  ssim=0.9608  encMs= 149.9
+lw:sharpyuv    q=80  avgKB=  27.51  ssim=0.9703  encMs= 141.8
+lw:sharpyuv    q=85  avgKB=  34.15  ssim=0.9786  encMs= 144.0
+lw:sharpyuv    q=90  avgKB=  44.65  ssim=0.9863  encMs= 149.6
+lw:sharpyuv    q=95  avgKB=  62.43  ssim=0.9925  encMs= 144.2
+lw:minimal     q=40  avgKB=  16.67  ssim=0.9330  encMs= 136.7
+lw:minimal     q=50  avgKB=  18.89  ssim=0.9425  encMs= 132.4
+lw:minimal     q=60  avgKB=  20.74  ssim=0.9484  encMs= 126.5
+lw:minimal     q=70  avgKB=  23.57  ssim=0.9558  encMs= 130.5
+lw:minimal     q=75  avgKB=  24.79  ssim=0.9581  encMs= 121.9
+lw:minimal     q=80  avgKB=  31.05  ssim=0.9681  encMs= 133.2
+lw:minimal     q=85  avgKB=  37.42  ssim=0.9754  encMs= 138.6
+lw:minimal     q=90  avgKB=  48.62  ssim=0.9834  encMs= 134.4
+lw:minimal     q=95  avgKB=  72.31  ssim=0.9911  encMs= 127.9
+lw:min_m4      q=40  avgKB=  14.63  ssim=0.9307  encMs= 130.8
+lw:min_m4      q=50  avgKB=  16.65  ssim=0.9406  encMs= 131.3
+lw:min_m4      q=60  avgKB=  18.34  ssim=0.9469  encMs= 133.1
+lw:min_m4      q=70  avgKB=  20.83  ssim=0.9547  encMs= 134.3
+lw:min_m4      q=75  avgKB=  21.86  ssim=0.9573  encMs= 136.7
+lw:min_m4      q=80  avgKB=  27.05  ssim=0.9685  encMs= 136.6
+lw:min_m4      q=85  avgKB=  32.22  ssim=0.9760  encMs= 134.2
+lw:min_m4      q=90  avgKB=  41.08  ssim=0.9848  encMs= 134.1
+lw:min_m4      q=95  avgKB=  57.30  ssim=0.9924  encMs= 132.1
+
+== ssim 0.9728 에서의 크기 ==
+libwebp          27.79KB  vs libwebp  +0.0%
+lw:m0            34.85KB  vs libwebp +25.4%
+lw:m1            32.98KB  vs libwebp +18.7%
+lw:m2            29.76KB  vs libwebp  +7.1%
+lw:m3            27.83KB  vs libwebp  +0.1%
+lw:m5            28.20KB  vs libwebp  +1.5%
+lw:m6            27.83KB  vs libwebp  +0.1%
+lw:sns0          29.76KB  vs libwebp  +7.1%
+lw:sns100        27.89KB  vs libwebp  +0.4%
+lw:seg1          30.77KB  vs libwebp +10.7%
+lw:f0            28.02KB  vs libwebp  +0.8%
+lw:nostrong      28.11KB  vs libwebp  +1.2%
+lw:af            27.39KB  vs libwebp  -1.4%
+lw:sharpyuv      29.34KB  vs libwebp  +5.6%
+lw:minimal       34.97KB  vs libwebp +25.8%
+lw:min_m4        29.85KB  vs libwebp  +7.4%

@@ -36,3 +36,30 @@ JPEG q85와 같은 화질(휘도 SSIM 0.9705)에서의 크기 — COCO val2017 9
 
 - VP8 비트스트림: RFC 6386. 컨테이너: Google WebP Container Specification
 - libwebp는 BSD-3. 코드를 옮겨 오면 고지 의무가 생긴다 — 명세 기반 구현이면 불필요
+
+## 기준선과 격차 분해 (2026-10-31, `bench/`)
+
+COCO val2017 150장(`~/datasets/coco_val/images`), 0.75배 축소. 목표 SSIM 0.9728(JPEG q85)에서 잰 크기:
+libwebp 27.79KB, deepteams 34.00KB(**+22.3%**), JPEG 39.09KB. 원 측정의 +21%가 재현됐다.
+원본: `bench/results/baseline.txt`
+
+libwebp 기능을 하나씩 끄거나 바꿔 잰 결과(libwebp 기본 `-m 4` 대비, 원본: `bench/results/ablation.txt`):
+
+| 변형 | 크기 차 | 해석 |
+|---|---|---|
+| `-m 3` / `-m 6` | +0.1% / +0.1% | trellis(m5·m6)는 휘도 SSIM 기준 이득이 없다 (m5는 +1.5%) |
+| `-m 2` | +7.1% | m2→m3 사이(libwebp는 m≥3에서 RD 기반 모드 결정 시작)가 격차의 한 축 |
+| `-m 1` / `-m 0` | +18.7% / +25.4% | |
+| `-segments 1` | +10.7% | 세그먼트별 양자화가 단일 기능으로 가장 크다 |
+| `-sns 0` | +7.1% | 적응 양자화를 끄면 세그먼트 효과가 대부분 사라진다 |
+| `-sns 0 -segments 1` | +7.4% | |
+| `-m 2 -sns 0 -segments 1` | **+25.8%** | deepteams(+22.3%)와 비슷한 수준 |
+| `-f 0`, `-nostrong` | +0.8%, +1.2% | 루프 필터 세부는 작다 |
+| `-af` | −1.4% | 자동 필터 강도는 소폭 이득 |
+| `-sharp_yuv` | +5.6% | 휘도 SSIM으로는 손해 |
+
+결론: 합격선(+5%)에는 **세그먼트 적응 양자화(SNS)** 와 **RD 기반 모드 결정** 둘 다 필요하다
+(각각 하나만 빠져도 +7%, 둘 다 빠지면 +26%). trellis는 우선순위에서 뺀다.
+단, 이 결론은 휘도 SSIM 하나에 기대고 있다. trellis처럼 SSE를 최적화하는 기능은 다른 지표에서 다르게 나올 수 있다.
+
+실행: `cd bench && go run . -dir <jpg 디렉터리> [-codecs libwebp,deepteams] [-variants "이름=cwebp 인자;..."]`

@@ -1,0 +1,6 @@
+github.com/deepteams/webp v1.2.8 h1:iFLBxo4V34ixqay6+MTB18zujCM8VSe1ejsYh+ue1nA=
+github.com/deepteams/webp v1.2.8/go.mod h1:J8Ap+HAixxpKKRN9IpEeSKlfvhsef1v43jKTO7m3f4c=
+github.com/linzeyan/webp-go v0.1.2 h1:iQCoojamZLDUDppjI6rgwnS16m6pWaOKVPnTO7E6YaI=
+github.com/linzeyan/webp-go v0.1.2/go.mod h1:yLDJu7/4jjvN0HVmkZtvrmn9ItBmTF7rA3r+tM4lZsU=
+golang.org/x/image v0.41.0 h1:8wS72eGJMJaBxK6okTzd4WaXumUlTVlb753MlsSvTCo=
+golang.org/x/image v0.41.0/go.mod h1:uIc348UZMSvS5Z65CVZ7iDPaNobNFEPeJ4kbqTOszmA=
