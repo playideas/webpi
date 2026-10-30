@@ -40,7 +40,7 @@ func main() {
 	flag.StringVar(&o.dir, "dir", "", "JPEG 원본 디렉터리")
 	// 원본이 이미 JPEG라 그대로 재압축하면 8×8 격자가 맞아 JPEG가 부당하게 유리하다 — 축소해서 격자를 깬다
 	flag.Float64Var(&o.scale, "scale", 0.75, "인코딩 전 축소 비율 (1이면 축소 안 함)")
-	flag.StringVar(&o.codecs, "codecs", "jpeg,libwebp,deepteams", "기본 코덱 (jpeg,libwebp,deepteams,linzeyan)")
+	flag.StringVar(&o.codecs, "codecs", "jpeg,libwebp,deepteams", "기본 코덱 (jpeg,libwebp,deepteams,linzeyan,webpi)")
 	flag.StringVar(&o.variants, "variants", "", `libwebp 변형 "이름=cwebp 인자;..." 예: "sns0=-sns 0;seg1=-segments 1"`)
 	flag.Float64Var(&o.target, "target", 0, "기준 SSIM (0이면 JPEG q85의 SSIM)")
 	// 병렬이면 인코딩 시간이 서로 간섭한다 — 속도를 볼 때는 -j 1

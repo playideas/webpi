@@ -63,3 +63,11 @@ libwebp 기능을 하나씩 끄거나 바꿔 잰 결과(libwebp 기본 `-m 4` �
 단, 이 결론은 휘도 SSIM 하나에 기대고 있다. trellis처럼 SSE를 최적화하는 기능은 다른 지표에서 다르게 나올 수 있다.
 
 실행: `cd bench && go run . -dir <jpg 디렉터리> [-codecs libwebp,deepteams] [-variants "이름=cwebp 인자;..."]`
+
+## 진행 기록
+
+| 단계 | ssim 0.9728 크기 | vs libwebp | 원본 |
+|---|---|---|---|
+| 골격: i16 예측(SSE 최소), 고정 양자화, 루프 필터 끔, 토큰 확률 갱신 | 34.89KB | +25.5% | `bench/results/webpi-skeleton.txt` |
+
+골격 출력은 dwebp `-yuv` 결과가 인코더의 복원 평면과 비트 단위로 같다 (`Test_encodeFrame_noLoopFilter_dwebpYUVMatchesReconstructionExactly`).

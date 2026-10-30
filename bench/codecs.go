@@ -13,6 +13,8 @@ import (
 
 	deepteams "github.com/deepteams/webp"
 	linzeyan "github.com/linzeyan/webp-go"
+
+	"github.com/playidea-lab/webpi"
 )
 
 // 인코딩 노력 수준: 비교 대상 WebP 인코더 모두 기본값 4
@@ -32,6 +34,7 @@ func builtinCodecs() map[string]codec {
 		"libwebp":   cwebpCodec("libwebp", nil),
 		"deepteams": {"deepteams", encodeDeepteams, decodeDwebp},
 		"linzeyan":  {"linzeyan", encodeLinzeyan, decodeDwebp},
+		"webpi":     {"webpi", encodeWebpi, decodeDwebp},
 	}
 }
 
@@ -70,6 +73,12 @@ func encodeDeepteams(img *image.RGBA, q int) ([]byte, error) {
 func encodeLinzeyan(img *image.RGBA, q int) ([]byte, error) {
 	var buf bytes.Buffer
 	err := linzeyan.Encode(&buf, img, &linzeyan.Options{Lossy: true, Quality: float32(q), Method: webpMethod})
+	return buf.Bytes(), err
+}
+
+func encodeWebpi(img *image.RGBA, q int) ([]byte, error) {
+	var buf bytes.Buffer
+	err := webpi.Encode(&buf, img, &webpi.Options{Quality: float32(q)})
 	return buf.Bytes(), err
 }
 
