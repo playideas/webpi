@@ -62,7 +62,7 @@ libwebp 기능을 하나씩 끄거나 바꿔 잰 결과(libwebp 기본 `-m 4` �
 (각각 하나만 빠져도 +7%, 둘 다 빠지면 +26%). trellis는 우선순위에서 뺀다.
 단, 이 결론은 휘도 SSIM 하나에 기대고 있다. trellis처럼 SSE를 최적화하는 기능은 다른 지표에서 다르게 나올 수 있다.
 
-실행: `cd bench && go run . -dir <jpg 디렉터리> [-codecs libwebp,deepteams] [-variants "이름=cwebp 인자;..."]`
+실행: `cd bench && go run . -dir <jpg 디렉터리> [-codecs libwebp,deepteams,deepteams-zero,webpi] [-variants "이름=cwebp 인자;..."]`
 
 ## 진행 기록
 
@@ -72,6 +72,44 @@ libwebp 기능을 하나씩 끄거나 바꿔 잰 결과(libwebp 기본 `-m 4` �
 | + 세그먼트 적응 양자화: DCT 분포로 MB 민감도 → k-means 4 세그먼트, SNS 50으로 세그먼트별 양자화, 색차 DC/AC 델타 | 33.30KB | +19.8% | `bench/results/webpi-segments.txt` |
 | + RD 모드 결정과 i4: i16·i4(10모드)·색차를 (왜곡 + 텍스처 왜곡 + λ·비트) 점수로 선택, λ·평탄도 벌점은 libwebp method 4와 같게 | 27.94KB | +0.5% | `bench/results/webpi-rd-i4.txt` |
 
-모든 단계에서 dwebp `-yuv` 결과가 인코더의 복원 평면과 비트 단위로 같다 (`Test_encodeFrame_noLoopFilter_dwebpYUVMatchesReconstructionExactly`).
+모든 단계에서 dwebp `-nofilter -yuv` 결과가 인코더의 복원 평면과 비트 단위로 같다 (`Test_encodeFrame_dwebpUnfilteredYUV_matchesReconstructionExactly`).
 
-속도(`-j 1` 직렬, q75 장당): webpi 44.5ms, deepteams 7.5ms, libwebp 37.6ms(cwebp 프로세스 실행 포함). RD·i4 도입으로 webpi가 deepteams의 약 6배 — 합격 기준 4(같은 자릿수) 안이지만 여유가 적다.
+### 다중 지표 검증 (2026-10-31)
+
+휘도 SSIM 하나로는 색차를 굶기는 인코더를 가려낼 수 없어서 지표를 넷으로 늘렸다:
+휘도 SSIM, 색차(Cb·Cr) SSIM, (6·Y+Cb+Cr)/8 가중 PSNR, RGB PSNR.
+각 지표의 JPEG q85 값에서의 크기와, 곡선이 겹치는 구간 전체의 BD-rate를 libwebp 대비로 낸다.
+
+기존 하네스는 deepteams 옵션을 구조체 리터럴로 만들어 SNS·루프 필터·세그먼트가 모두 꺼진 채였다(`deepteams-zero`).
+지금은 `DefaultOptions()`(libwebp 기본값)로 부른다. 이전 표의 +22.3%는 `deepteams-zero`의 값이다.
+
+| 코덱 | ssim-y | ssim-uv | psnr-yuv | psnr-rgb |
+|---|---|---|---|---|
+| deepteams (기본값) | +14.1% / +16.6% | −8.9% / −9.1% | +6.5% / +6.5% | +3.8% / +3.4% |
+| deepteams-zero | +22.3% / +23.5% | −8.6% / −7.6% | +2.7% / +2.3% | +0.8% / +1.3% |
+| **webpi** | **+2.2% / +1.8%** | **−9.7% / −10.4%** | **+0.8% / +1.9%** | **−1.5% / −1.1%** |
+
+(기준점 값 / BD-rate, libwebp 대비 크기 차. 원본: `bench/results/webpi-multimetric.txt`)
+webpi가 두 deepteams 설정 모두를 네 지표·두 측정 방식 전부에서 앞선다.
+
+이 단계에서 바뀐 것:
+- 루프 필터: libwebp와 같은 세그먼트별 강도(세기 60) — 모든 지표 소폭 이득
+- 색차 2×2 평균을 감마 보정 공간에서 (libwebp와 같음)
+- 색차 AC 양자화 −3단계, λ_uv를 libwebp의 1/4로: 색차가 휘도 기준 세그먼트 양자화를 따라가며 질감 많은 영역에서 과하게 깎이던 것을 보정.
+  휘도 지표를 ~2% 내주고 색차 SSIM ~6%, RGB PSNR ~1%를 얻는다 (스윕 비교 후 선택)
+- 시도했지만 뺀 것: libwebp 주파수 샤프닝(모든 지표 악화), 2패스 확률(휘도 0.4% 이득에 시간 2배)
+
+### 속도
+
+| | 시작 | 지금 | deepteams 기본값 |
+|---|---|---|---|
+| `-j 1` 직렬, 장당 q50 / q75 / q90 | — / 44.5ms / — | 5.5 / 6.1 / 8.3ms | 5.4 / 6.4 / 9.8ms |
+| `-j 16` 동시(코어당 처리량), q75 | 95ms | 45ms | 40ms |
+
+(원본: `bench/results/webpi-multimetric-j1.txt`, `webpi-multimetric.txt`)
+- 비용 표: 토큰 트리를 따라가는 대신 libwebp식 레벨 비용 표로 RD 비트 수를 낸다
+- 매크로블록 행을 대각선 물결로 동시에 인코딩한다. 순차 인코딩과 바이트 단위로 같다 (`Test_Encode_parallelRows_matchesSingleThreadBytes`).
+  deepteams는 스레드 수에 따라 출력이 달라진다
+- 블록마다 힙 할당 제거(인코딩당 1.39M → ~100회), 부분 점수로 확실히 지는 후보 조기 종료(결과 불변)
+- 직렬 지연은 q70 이상에서 deepteams보다 빠르다. 코어당 처리량은 ~12% 뒤진다 — deepteams는 일부 커널이 어셈블리다.
+  i4 후보를 예측 오차 순 5~6개로 줄이면 처리량도 앞서지만 모든 지표가 ~0.3% 나빠져서 넣지 않았다

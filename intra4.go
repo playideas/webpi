@@ -54,12 +54,7 @@ func pred4(mode int, e *b4Edges) [16]uint8 {
 	return p
 }
 
-// set4는 (x,y)들의 목록에 같은 값을 쓴다 — 대각 모드는 같은 값이 대각선을 따라 반복된다.
-func set4(p *[16]uint8, v uint8, xy ...int) {
-	for i := 0; i < len(xy); i += 2 {
-		p[xy[i+1]*4+xy[i]] = v
-	}
-}
+// 대각 모드는 같은 값이 대각선을 따라 반복된다 — 아래 예측기들은 p[y*4+x]에 직접 쓴다.
 
 func pred4DC(e *b4Edges, p *[16]uint8) {
 	sum := int32(4)
@@ -102,81 +97,180 @@ func pred4HE(e *b4Edges, p *[16]uint8) {
 func pred4RD(e *b4Edges, p *[16]uint8) {
 	X, A, B, C, D := e.top[0], e.top[1], e.top[2], e.top[3], e.top[4]
 	I, J, K, L := e.left[0], e.left[1], e.left[2], e.left[3]
-	set4(p, avg3(J, K, L), 0, 3)
-	set4(p, avg3(I, J, K), 1, 3, 0, 2)
-	set4(p, avg3(X, I, J), 2, 3, 1, 2, 0, 1)
-	set4(p, avg3(A, X, I), 3, 3, 2, 2, 1, 1, 0, 0)
-	set4(p, avg3(B, A, X), 3, 2, 2, 1, 1, 0)
-	set4(p, avg3(C, B, A), 3, 1, 2, 0)
-	set4(p, avg3(D, C, B), 3, 0)
+	p[12] = avg3(J, K, L)
+	{
+		v := avg3(I, J, K)
+		p[13], p[8] = v, v
+	}
+	{
+		v := avg3(X, I, J)
+		p[14], p[9], p[4] = v, v, v
+	}
+	{
+		v := avg3(A, X, I)
+		p[15], p[10], p[5], p[0] = v, v, v, v
+	}
+	{
+		v := avg3(B, A, X)
+		p[11], p[6], p[1] = v, v, v
+	}
+	{
+		v := avg3(C, B, A)
+		p[7], p[2] = v, v
+	}
+	p[3] = avg3(D, C, B)
 }
 
 func pred4VR(e *b4Edges, p *[16]uint8) {
 	X, A, B, C, D := e.top[0], e.top[1], e.top[2], e.top[3], e.top[4]
 	I, J, K := e.left[0], e.left[1], e.left[2]
-	set4(p, avg2(X, A), 0, 0, 1, 2)
-	set4(p, avg2(A, B), 1, 0, 2, 2)
-	set4(p, avg2(B, C), 2, 0, 3, 2)
-	set4(p, avg2(C, D), 3, 0)
-	set4(p, avg3(K, J, I), 0, 3)
-	set4(p, avg3(J, I, X), 0, 2)
-	set4(p, avg3(I, X, A), 0, 1, 1, 3)
-	set4(p, avg3(X, A, B), 1, 1, 2, 3)
-	set4(p, avg3(A, B, C), 2, 1, 3, 3)
-	set4(p, avg3(B, C, D), 3, 1)
+	{
+		v := avg2(X, A)
+		p[0], p[9] = v, v
+	}
+	{
+		v := avg2(A, B)
+		p[1], p[10] = v, v
+	}
+	{
+		v := avg2(B, C)
+		p[2], p[11] = v, v
+	}
+	p[3] = avg2(C, D)
+	p[12] = avg3(K, J, I)
+	p[8] = avg3(J, I, X)
+	{
+		v := avg3(I, X, A)
+		p[4], p[13] = v, v
+	}
+	{
+		v := avg3(X, A, B)
+		p[5], p[14] = v, v
+	}
+	{
+		v := avg3(A, B, C)
+		p[6], p[15] = v, v
+	}
+	p[7] = avg3(B, C, D)
 }
 
 func pred4LD(e *b4Edges, p *[16]uint8) {
 	A, B, C, D := e.top[1], e.top[2], e.top[3], e.top[4]
 	E, F, G, H := e.top[5], e.top[6], e.top[7], e.top[8]
-	set4(p, avg3(A, B, C), 0, 0)
-	set4(p, avg3(B, C, D), 1, 0, 0, 1)
-	set4(p, avg3(C, D, E), 2, 0, 1, 1, 0, 2)
-	set4(p, avg3(D, E, F), 3, 0, 2, 1, 1, 2, 0, 3)
-	set4(p, avg3(E, F, G), 3, 1, 2, 2, 1, 3)
-	set4(p, avg3(F, G, H), 3, 2, 2, 3)
-	set4(p, avg3(G, H, H), 3, 3)
+	p[0] = avg3(A, B, C)
+	{
+		v := avg3(B, C, D)
+		p[1], p[4] = v, v
+	}
+	{
+		v := avg3(C, D, E)
+		p[2], p[5], p[8] = v, v, v
+	}
+	{
+		v := avg3(D, E, F)
+		p[3], p[6], p[9], p[12] = v, v, v, v
+	}
+	{
+		v := avg3(E, F, G)
+		p[7], p[10], p[13] = v, v, v
+	}
+	{
+		v := avg3(F, G, H)
+		p[11], p[14] = v, v
+	}
+	p[15] = avg3(G, H, H)
 }
 
 func pred4VL(e *b4Edges, p *[16]uint8) {
 	A, B, C, D := e.top[1], e.top[2], e.top[3], e.top[4]
 	E, F, G, H := e.top[5], e.top[6], e.top[7], e.top[8]
-	set4(p, avg2(A, B), 0, 0)
-	set4(p, avg2(B, C), 1, 0, 0, 2)
-	set4(p, avg2(C, D), 2, 0, 1, 2)
-	set4(p, avg2(D, E), 3, 0, 2, 2)
-	set4(p, avg3(A, B, C), 0, 1)
-	set4(p, avg3(B, C, D), 1, 1, 0, 3)
-	set4(p, avg3(C, D, E), 2, 1, 1, 3)
-	set4(p, avg3(D, E, F), 3, 1, 2, 3)
-	set4(p, avg3(E, F, G), 3, 2)
-	set4(p, avg3(F, G, H), 3, 3)
+	p[0] = avg2(A, B)
+	{
+		v := avg2(B, C)
+		p[1], p[8] = v, v
+	}
+	{
+		v := avg2(C, D)
+		p[2], p[9] = v, v
+	}
+	{
+		v := avg2(D, E)
+		p[3], p[10] = v, v
+	}
+	p[4] = avg3(A, B, C)
+	{
+		v := avg3(B, C, D)
+		p[5], p[12] = v, v
+	}
+	{
+		v := avg3(C, D, E)
+		p[6], p[13] = v, v
+	}
+	{
+		v := avg3(D, E, F)
+		p[7], p[14] = v, v
+	}
+	p[11] = avg3(E, F, G)
+	p[15] = avg3(F, G, H)
 }
 
 func pred4HD(e *b4Edges, p *[16]uint8) {
 	X, A, B, C := e.top[0], e.top[1], e.top[2], e.top[3]
 	I, J, K, L := e.left[0], e.left[1], e.left[2], e.left[3]
-	set4(p, avg2(I, X), 0, 0, 2, 1)
-	set4(p, avg2(J, I), 0, 1, 2, 2)
-	set4(p, avg2(K, J), 0, 2, 2, 3)
-	set4(p, avg2(L, K), 0, 3)
-	set4(p, avg3(A, B, C), 3, 0)
-	set4(p, avg3(X, A, B), 2, 0)
-	set4(p, avg3(I, X, A), 1, 0, 3, 1)
-	set4(p, avg3(J, I, X), 1, 1, 3, 2)
-	set4(p, avg3(K, J, I), 1, 2, 3, 3)
-	set4(p, avg3(L, K, J), 1, 3)
+	{
+		v := avg2(I, X)
+		p[0], p[6] = v, v
+	}
+	{
+		v := avg2(J, I)
+		p[4], p[10] = v, v
+	}
+	{
+		v := avg2(K, J)
+		p[8], p[14] = v, v
+	}
+	p[12] = avg2(L, K)
+	p[3] = avg3(A, B, C)
+	p[2] = avg3(X, A, B)
+	{
+		v := avg3(I, X, A)
+		p[1], p[7] = v, v
+	}
+	{
+		v := avg3(J, I, X)
+		p[5], p[11] = v, v
+	}
+	{
+		v := avg3(K, J, I)
+		p[9], p[15] = v, v
+	}
+	p[13] = avg3(L, K, J)
 }
 
 func pred4HU(e *b4Edges, p *[16]uint8) {
 	I, J, K, L := e.left[0], e.left[1], e.left[2], e.left[3]
-	set4(p, avg2(I, J), 0, 0)
-	set4(p, avg2(J, K), 2, 0, 0, 1)
-	set4(p, avg2(K, L), 2, 1, 0, 2)
-	set4(p, avg3(I, J, K), 1, 0)
-	set4(p, avg3(J, K, L), 3, 0, 1, 1)
-	set4(p, avg3(K, L, L), 3, 1, 1, 2)
-	set4(p, uint8(L), 3, 2, 2, 2, 0, 3, 1, 3, 2, 3, 3, 3)
+	p[0] = avg2(I, J)
+	{
+		v := avg2(J, K)
+		p[2], p[4] = v, v
+	}
+	{
+		v := avg2(K, L)
+		p[6], p[8] = v, v
+	}
+	p[1] = avg3(I, J, K)
+	{
+		v := avg3(J, K, L)
+		p[3], p[5] = v, v
+	}
+	{
+		v := avg3(K, L, L)
+		p[7], p[9] = v, v
+	}
+	{
+		v := uint8(L)
+		p[11], p[10], p[12], p[13], p[14], p[15] = v, v, v, v, v, v
+	}
 }
 
 // lumaWorkspace는 i4 탐색 중 매크로블록의 복원 픽셀과 이웃을 담는다.

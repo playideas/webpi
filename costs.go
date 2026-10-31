@@ -1,5 +1,7 @@
 package webpi
 
+import "sync"
+
 // 계수 비용 표 — RD에서 블록마다 토큰 트리를 따라가지 않고 표를 더해 비용을 낸다 (libwebp cost_enc.c와 같은 구조).
 // 확률에 따라 달라지는 토큰 경로는 범주 6이 시작하는 레벨까지만 다르고, 그 위는 고정 확률의 추가 비트만 늘어난다.
 const (
@@ -27,6 +29,9 @@ var cat6Extra = func() (t [maxLevel - maxCostLevel + 1]int32) {
 	return t
 }()
 
+// defaultLevelCosts는 기본 확률표의 비용 표다. 모든 프레임이 같은 표에서 시작하므로 한 번만 만든다.
+var defaultLevelCosts = sync.OnceValue(func() *levelCosts { return newLevelCosts(&defaultTokenProb) })
+
 func newLevelCosts(p *probTable) *levelCosts {
 	c := &levelCosts{probs: *p}
 	var r int64
@@ -53,25 +58,19 @@ func newLevelCosts(p *probTable) *levelCosts {
 	return c
 }
 
-// level은 크기 v(부호 없음) 계수의 비용이다.
-func (c *levelCosts) level(plane, band, ctx int, v int32) int64 {
-	if v <= maxCostLevel {
-		return int64(c.lv[plane][band][ctx][v])
-	}
-	return int64(c.lv[plane][band][ctx][maxCostLevel] + cat6Extra[v-maxCostLevel] - cat6Extra[0])
-}
-
 // residual은 tokenWriter.block과 같은 토큰열의 비용과, 0이 아닌 계수 유무를 돌려준다.
 func (c *levelCosts) residual(levels *[16]int32, plane, ctx0, first int) (int64, int) {
-	p := &c.probs
+	// 지그재그 순서의 크기를 한 번에 모으면서 마지막 0 아닌 위치를 찾는다
+	var z [16]int32
 	last := -1
 	for n := 15; n >= first; n-- {
-		if levels[zigzag[n]] != 0 {
+		z[n] = abs32(levels[zigzag[n]])
+		if last < 0 && z[n] != 0 {
 			last = n
-			break
 		}
 	}
-	p0 := p[plane][bands[first]][ctx0][0]
+	p := &c.probs[plane]
+	p0 := p[bands[first]][ctx0][0]
 	if last < 0 {
 		return bitCost256(p0, false), 0
 	}
@@ -79,14 +78,20 @@ func (c *levelCosts) residual(levels *[16]int32, plane, ctx0, first int) (int64,
 	if ctx0 == 0 {
 		cost = bitCost256(p0, true)
 	}
+	lv := &c.lv[plane]
 	ctx := ctx0
 	for n := first; n <= last; n++ {
-		v := abs32(levels[zigzag[n]])
-		cost += c.level(plane, int(bands[n]), ctx, v)
+		v := z[n]
+		t := &lv[bands[n]][ctx]
+		if v <= maxCostLevel {
+			cost += int64(t[v])
+		} else {
+			cost += int64(t[maxCostLevel] + cat6Extra[v-maxCostLevel] - cat6Extra[0])
+		}
 		ctx = int(min(v, 2))
 	}
 	if last < 15 {
-		cost += bitCost256(p[plane][bands[last+1]][ctx][0], false)
+		cost += bitCost256(p[bands[last+1]][ctx][0], false)
 	}
 	return cost, 1
 }

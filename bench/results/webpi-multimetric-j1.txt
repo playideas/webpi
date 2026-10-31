@@ -1,0 +1,40 @@
+images=150 scale=0.75 jobs=1
+targets ssimY=0.9728 ssimUV=0.9257 psnrYUV=38.33 psnrRGB=33.95
+libwebp        q=40  avgKB=  13.74  ssimY=0.9314 ssimUV=0.9118 psnrYUV=34.44 psnrRGB=31.32  encMs=  34.5
+libwebp        q=50  avgKB=  15.82  ssimY=0.9418 ssimUV=0.9176 psnrYUV=35.31 psnrRGB=32.03  encMs=  34.9
+libwebp        q=60  avgKB=  17.90  ssimY=0.9500 ssimUV=0.9229 psnrYUV=36.07 psnrRGB=32.65  encMs=  35.2
+libwebp        q=70  avgKB=  20.23  ssimY=0.9575 ssimUV=0.9279 psnrYUV=36.86 psnrRGB=33.27  encMs=  35.2
+libwebp        q=75  avgKB=  21.52  ssimY=0.9608 ssimUV=0.9304 psnrYUV=37.29 psnrRGB=33.60  encMs=  35.3
+libwebp        q=80  avgKB=  26.22  ssimY=0.9705 ssimUV=0.9383 psnrYUV=38.67 psnrRGB=34.64  encMs=  35.8
+libwebp        q=85  avgKB=  32.42  ssimY=0.9789 ssimUV=0.9459 psnrYUV=40.17 psnrRGB=35.71  encMs=  36.3
+libwebp        q=90  avgKB=  42.35  ssimY=0.9868 ssimUV=0.9541 psnrYUV=42.12 psnrRGB=37.01  encMs=  37.0
+libwebp        q=95  avgKB=  59.61  ssimY=0.9931 ssimUV=0.9616 psnrYUV=44.45 psnrRGB=38.39  encMs=  38.5
+deepteams      q=40  avgKB=  12.64  ssimY=0.9010 ssimUV=0.9110 psnrYUV=33.13 psnrRGB=30.34  encMs=   4.5
+deepteams      q=50  avgKB=  14.48  ssimY=0.9185 ssimUV=0.9176 psnrYUV=34.19 psnrRGB=31.23  encMs=   5.4
+deepteams      q=60  avgKB=  16.58  ssimY=0.9313 ssimUV=0.9235 psnrYUV=35.06 psnrRGB=31.96  encMs=   5.8
+deepteams      q=70  avgKB=  18.90  ssimY=0.9422 ssimUV=0.9291 psnrYUV=35.92 psnrRGB=32.68  encMs=   6.2
+deepteams      q=75  avgKB=  20.21  ssimY=0.9473 ssimUV=0.9320 psnrYUV=36.39 psnrRGB=33.05  encMs=   6.4
+deepteams      q=80  avgKB=  24.98  ssimY=0.9606 ssimUV=0.9402 psnrYUV=37.88 psnrRGB=34.20  encMs=   7.2
+deepteams      q=85  avgKB=  31.23  ssimY=0.9722 ssimUV=0.9479 psnrYUV=39.49 psnrRGB=35.39  encMs=   8.2
+deepteams      q=90  avgKB=  41.15  ssimY=0.9824 ssimUV=0.9560 psnrYUV=41.52 psnrRGB=36.79  encMs=   9.8
+deepteams      q=95  avgKB=  58.34  ssimY=0.9909 ssimUV=0.9628 psnrYUV=43.96 psnrRGB=38.26  encMs=  12.3
+webpi          q=40  avgKB=  13.41  ssimY=0.9294 ssimUV=0.9155 psnrYUV=34.33 psnrRGB=31.26  encMs=   5.2
+webpi          q=50  avgKB=  15.49  ssimY=0.9402 ssimUV=0.9211 psnrYUV=35.20 psnrRGB=32.00  encMs=   5.5
+webpi          q=60  avgKB=  17.60  ssimY=0.9489 ssimUV=0.9264 psnrYUV=35.99 psnrRGB=32.65  encMs=   5.6
+webpi          q=70  avgKB=  20.03  ssimY=0.9565 ssimUV=0.9317 psnrYUV=36.80 psnrRGB=33.32  encMs=   5.9
+webpi          q=75  avgKB=  21.37  ssimY=0.9599 ssimUV=0.9343 psnrYUV=37.22 psnrRGB=33.65  encMs=   6.1
+webpi          q=80  avgKB=  26.32  ssimY=0.9699 ssimUV=0.9423 psnrYUV=38.63 psnrRGB=34.74  encMs=   6.6
+webpi          q=85  avgKB=  33.26  ssimY=0.9787 ssimUV=0.9504 psnrYUV=40.19 psnrRGB=35.89  encMs=   7.3
+webpi          q=90  avgKB=  44.55  ssimY=0.9867 ssimUV=0.9586 psnrYUV=42.17 psnrRGB=37.25  encMs=   8.3
+webpi          q=95  avgKB=  62.36  ssimY=0.9930 ssimUV=0.9637 psnrYUV=44.45 psnrRGB=38.52  encMs=  10.0
+
+== 지표별 기준값에서의 크기 (vs libwebp) ==
+codec             ssim-y   ssim-uv  psnr-yuv  psnr-rgb
+libwebp            +0.0%     +0.0%     +0.0%     +0.0%
+deepteams         +14.1%     -8.9%     +6.5%     +3.8%
+webpi              +2.2%     -9.7%     +0.8%     -1.5%
+
+== BD-rate (겹치는 구간 평균, vs libwebp) ==
+libwebp            +0.0%     +0.0%     +0.0%     +0.0%
+deepteams         +16.6%     -9.1%     +6.5%     +3.4%
+webpi              +1.8%    -10.4%     +1.9%     -1.1%

@@ -119,11 +119,6 @@ func ttransform(in []uint8, s int) int32 {
 	return sum
 }
 
-// regionDisto는 원본 평면 영역과 n×n 복원 블록의 SSE와 (tλ>0이면) 텍스처 왜곡을 구한다.
-func regionDisto(src []uint8, s, x0, y0 int, rec []uint8, n int, tlambda int64, srcT []int32) (d, sd int64) {
-	return regionSSE(src, s, x0, y0, rec, n), regionTDisto(rec, n, tlambda, srcT)
-}
-
 func regionSSE(src []uint8, s, x0, y0 int, rec []uint8, n int) int64 {
 	var d int64
 	for j := range n {

@@ -67,53 +67,69 @@ func encodeFrame(m image.Image, quality float32) (*encoder, []byte, error) {
 	for n := range nSegments {
 		e.lambdas[n] = newRDLambdas(&e.seg.quant[n])
 	}
-	e.costs = newLevelCosts(&e.probs)
+	e.costs = defaultLevelCosts()
 	e.nzTop, e.modeTop = make([]nzContext, src.mbw), make([]uint8, src.mbw*4)
 	e.mbs = make([]mbInfo, src.mbw*src.mbh)
-	e.encodeRows()
-	vp8, err := e.bitstream()
+	stats := e.encodeRows()
+	vp8, err := e.bitstream(stats)
 	return e, vp8, err
 }
 
 // 행 r의 매크로블록 x는 윗행이 x+1까지 끝나야 시작할 수 있다 — i4의 오른쪽 위 픽셀이 윗행 x+1에 있다.
 const wavefrontLag = 2
 
-// encodeRows는 매크로블록 행들을 대각선 물결(wavefront)로 동시에 인코딩한다.
+// encodeRows는 매크로블록 행들을 대각선 물결(wavefront)로 동시에 인코딩하고 프레임의 토큰 통계를 돌려준다.
 // 각 매크로블록은 왼쪽·위·오른쪽 위 이웃만 보므로, 윗행이 두 칸 앞서 있으면 결과가 순차 인코딩과 같다.
 // 행마다 끝낸 매크로블록 수를 채널 토큰으로 아랫행에 알린다 — 채널이 메모리 순서도 보장한다.
-func (e *encoder) encodeRows() {
+func (e *encoder) encodeRows() *tokenStats {
 	mbw, mbh := e.src.mbw, e.src.mbh
 	done := make([]chan struct{}, mbh)
 	for y := range done {
 		done[y] = make(chan struct{}, mbw)
 	}
+	rowStats := make([]tokenStats, mbh)
 	// 행을 위에서부터 차례로 집어 가므로 기다리는 윗행은 항상 이미 누군가 맡고 있다
-	parallelRows(mbh, func(y int) { e.encodeRow(y, done) })
+	parallelRows(mbh, func(y int) { e.encodeRow(y, done, &rowStats[y]) })
+	total := &rowStats[0]
+	for y := 1; y < mbh; y++ {
+		addStats(total, &rowStats[y])
+	}
+	return total
 }
 
-func (e *encoder) encodeRow(y int, done []chan struct{}) {
+func addStats(dst, src *tokenStats) {
+	for i := range dst {
+		for j := range dst[i] {
+			for k := range dst[i][j] {
+				for l := range dst[i][j][k] {
+					dst[i][j][k][l][0] += src[i][j][k][l][0]
+					dst[i][j][k][l][1] += src[i][j][k][l][1]
+				}
+			}
+		}
+	}
+}
+
+func (e *encoder) encodeRow(y int, done []chan struct{}, stats *tokenStats) {
 	mbw := e.src.mbw
-	r := rowCoder{encoder: e, modes: modeContext{top: e.modeTop}}
+	r := &rowCoder{encoder: e, modes: modeContext{top: e.modeTop}, stats: stats}
 	above := 0 // 윗행에서 끝났다고 확인한 매크로블록 수
 	for x := range mbw {
 		for y > 0 && above < min(x+wavefrontLag, mbw) {
 			<-done[y-1]
 			above++
 		}
-		e.mbs[y*mbw+x] = r.encodeMB(x, y)
+		r.encodeMB(x, y, &e.mbs[y*mbw+x])
 		done[y] <- struct{}{}
 	}
 }
 
 // bitstream은 확률을 정한 뒤 첫 파티션(헤더·모드)과 토큰 파티션을 써서 VP8 프레임을 만든다.
-func (e *encoder) bitstream() ([]byte, error) {
-	// skip 여부가 토큰 문맥을 바꾸므로 통계보다 먼저 정한다
+// stats는 인코딩 중 모은, 건너뛰지 않는 매크로블록들의 토큰 통계다.
+func (e *encoder) bitstream(stats *tokenStats) ([]byte, error) {
 	e.chooseSkipProb()
-	var stats tokenStats
-	e.writeTokens(&tokenWriter{stats: &stats})
-
 	hdr := newBoolEncoder()
-	e.writeHeader(hdr, &stats)
+	e.writeHeader(hdr, stats)
 	e.writeModes(hdr)
 	first := hdr.finish()
 	if len(first) > maxFirstPartSize {

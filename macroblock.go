@@ -1,5 +1,7 @@
 package webpi
 
+import "math"
+
 // 매크로블록 내 레벨 배열 배치: 0~15 휘도(래스터), 16~19 U, 20~23 V, 24 Y2
 const (
 	nYBlocks   = 16
@@ -30,6 +32,11 @@ type rowCoder struct {
 	modes  modeContext // top은 프레임 공유, left는 행 전용
 	srcT   [nYBlocks]int32
 	ws     lumaWorkspace // i4 탐색용, 매크로블록마다 다시 채운다
+	stats  *tokenStats   // 이 행의 토큰 통계 — 프레임 확률 갱신에 쓴다
+	// 휘도 후보 작업 공간 — 2KB짜리 결과를 값으로 주고받지 않도록 행마다 한 벌 둔다
+	i16 [2]lumaResult
+	i4  lumaResult
+	mb  mbInfo
 }
 
 // lumaResult는 휘도 후보 하나(i16 또는 i4)의 결정, 복원 픽셀, RD 점수다.
@@ -42,7 +49,7 @@ type lumaResult struct {
 // encodeMB는 (mbx,mby) 매크로블록의 모드를 RD 점수로 고르고 양자화한 뒤 rec에 복원값을 쓴다.
 // 복원은 디코더와 비트 단위로 같아야 다음 블록의 예측이 어긋나지 않는다.
 // 판단 PD-20261031-873a974c: i4 예측과 RD(왜곡 + λ·비트) 모드 결정을 함께 넣는다
-func (e *rowCoder) encodeMB(mbx, mby int) mbInfo {
+func (e *rowCoder) encodeMB(mbx, mby int, out *mbInfo) {
 	seg := e.seg.ids[mby*e.src.mbw+mbx]
 	q, lam := &e.seg.quant[seg], &e.lambdas[seg]
 	// 원본 쪽 텍스처 변환은 모드와 무관하므로 매크로블록마다 한 번만 구한다
@@ -50,12 +57,14 @@ func (e *rowCoder) encodeMB(mbx, mby int) mbInfo {
 		e.srcT[b] = ttransform(e.src.y[(mby*mbSize+(b/4)*4)*e.src.ys+mbx*mbSize+(b%4)*4:], e.src.ys)
 	}
 	luma := e.pickI16(q, lam, mbx, mby)
-	if i4, ok := e.pickI4(q, lam, mbx, mby, luma.score.score); ok {
-		luma = i4
+	if e.pickI4(q, lam, mbx, mby, luma.score.score) {
+		luma = &e.i4
 	}
-	mb := luma.mb
+	// 결정은 캐시에 있는 지역 변수에서 마무리하고 프레임 배열에는 한 번만 쓴다
+	mb := &e.mb
+	*mb = luma.mb
 	copyBlock(e.rec.y, e.rec.ys, mbx*mbSize, mby*mbSize, luma.rec[:], mbSize)
-	e.pickUV(&mb, q, lam, mbx, mby)
+	e.pickUV(mb, q, lam, mbx, mby)
 
 	mb.skip = true
 	for b := range mb.levels {
@@ -63,35 +72,53 @@ func (e *rowCoder) encodeMB(mbx, mby int) mbInfo {
 			mb.skip = false
 		}
 	}
-	// 다음 매크로블록의 비용 계산을 위해 문맥을 넘긴다 (쓰기 없이 문맥만 계산)
+	// 다음 매크로블록의 비용 계산을 위해 문맥을 넘기면서 토큰 통계를 모은다.
+	// 건너뛸 매크로블록은 토큰을 쓰지 않지만, 계수가 모두 0이라 문맥은 토큰을 썼을 때와 같다.
 	var w tokenWriter
-	writeLumaTokens(&w, &mb, &e.nzTop[mbx], &e.nzLeft)
-	writeChromaTokens(&w, &mb, &e.nzTop[mbx], &e.nzLeft)
-	e.modes.update(&mb, mbx)
-	return mb
+	if !mb.skip {
+		w.stats = e.stats
+	}
+	writeLumaTokens(&w, mb, &e.nzTop[mbx], &e.nzLeft)
+	writeChromaTokens(&w, mb, &e.nzTop[mbx], &e.nzLeft)
+	e.modes.update(mb, mbx)
+	*out = *mb
 }
 
 // pickI16은 16×16 모드 4개 중 λ_i16 점수가 가장 낮은 것을 고르고, i4와 비교할 수 있게 λ_mode로 다시 매긴다.
-func (e *rowCoder) pickI16(q *quantizer, lam *rdLambdas, mbx, mby int) lumaResult {
+// 결과는 rowCoder의 작업 공간을 가리킨다 (다음 매크로블록에서 덮어쓴다).
+func (e *rowCoder) pickI16(q *quantizer, lam *rdLambdas, mbx, mby int) *lumaResult {
 	x0, y0 := mbx*mbSize, mby*mbSize
 	ye := loadEdges(e.rec.y, e.rec.ys, x0, y0, mbSize)
 	flat := isFlatSource(e.src.y, e.src.ys, x0, y0)
-	var best lumaResult
+	best, c := &e.i16[0], &e.i16[1]
 	var buf predBuf
 	for m := range nPredModes {
-		var c lumaResult
-		c.mb.yMode = m
-		e.quantLuma16(q, predict(m, &ye, mbSize, &buf), x0, y0, &c)
-		c.score.d, c.score.sd = regionDisto(e.src.y, e.src.ys, x0, y0, c.rec[:], mbSize, lam.t, e.srcT[:])
-		c.score.h = i16ModeCost[m]
-		c.score.r = e.lumaRate(&c.mb, mbx)
-		// 원본이 완전히 평탄하면 왜곡을 더 무겁게 본다 — 평탄한 면의 얼룩이 가장 눈에 띈다
-		if flat = flat && isFlat(c.mb.levels[:nYBlocks], flatnessLimitI16); flat {
-			c.score.d, c.score.sd = 2*c.score.d, 2*c.score.sd
+		if m == 0 {
+			c = best
 		}
+		*c = lumaResult{}
+		c.mb.yMode = m
+		e.quantLuma16(q, predict(m, &ye, mbSize, &buf), x0, y0, c)
+		c.score.d = regionSSE(e.src.y, e.src.ys, x0, y0, c.rec[:], mbSize)
+		c.score.h = i16ModeCost[m]
+		// 원본이 완전히 평탄하면 왜곡을 더 무겁게 본다 — 평탄한 면의 얼룩이 가장 눈에 띈다.
+		// 한 번 평탄하지 않은 모드가 나오면 이후 모드에도 적용하지 않는다 (libwebp와 같음)
+		distoMul := int64(1)
+		if flat = flat && isFlat(c.mb.levels[:nYBlocks], flatnessLimitI16); flat {
+			distoMul = 2
+		}
+		c.score.d *= distoMul
+		// 텍스처 왜곡과 토큰 비용은 0 이상이므로 여기서 이미 최선보다 나쁘면 셀 필요가 없다
+		if c.score.setScore(lam.i16); m > 0 && c.score.score >= best.score.score {
+			continue
+		}
+		c.score.sd = distoMul * regionTDisto(c.rec[:], mbSize, lam.t, e.srcT[:])
+		c.score.r = e.lumaRate(&c.mb, mbx)
 		c.score.setScore(lam.i16)
-		if m == 0 || c.score.score < best.score.score {
-			best = c
+		if m == 0 {
+			c = &e.i16[1]
+		} else if c.score.score < best.score.score {
+			best, c = c, best
 		}
 	}
 	best.score.setScore(lam.mode)
@@ -137,10 +164,12 @@ func (e *rowCoder) lumaRate(mb *mbInfo, mbx int) int64 {
 
 // pickI4는 4×4 블록마다 10개 모드 중 가장 좋은 것을 고른다. 누적 점수가 limit(i16 점수)을
 // 넘는 순간 포기한다.
-func (e *rowCoder) pickI4(q *quantizer, lam *rdLambdas, mbx, mby int, limit int64) (lumaResult, bool) {
+// 결과는 e.i4에 남는다.
+func (e *rowCoder) pickI4(q *quantizer, lam *rdLambdas, mbx, mby int, limit int64) bool {
 	ws := &e.ws
 	ws.load(e.rec, mbx, mby)
-	var res lumaResult
+	res := &e.i4
+	*res = lumaResult{}
 	res.mb.i4 = true
 	res.score.h = i4HeaderCost
 	res.score.setScore(lam.mode)
@@ -152,7 +181,7 @@ func (e *rowCoder) pickI4(q *quantizer, lam *rdLambdas, mbx, mby int, limit int6
 		blk.score.setScore(lam.mode)
 		res.score.add(&blk.score)
 		if res.score.score >= limit {
-			return res, false
+			return false
 		}
 		res.mb.bModes[b], res.mb.levels[b] = blk.mode, blk.levels
 		ws.store4(bx, by, &blk.rec)
@@ -162,13 +191,8 @@ func (e *rowCoder) pickI4(q *quantizer, lam *rdLambdas, mbx, mby int, limit int6
 	for j := range mbSize {
 		copy(res.rec[j*mbSize:(j+1)*mbSize], ws[1+j][1:1+mbSize])
 	}
-	return res, true
+	return true
 }
-
-// i4Candidates는 예측 오차로 추린 뒤 RD로 끝까지 비교하는 4×4 모드 수다.
-// 전부 비교한다 — 줄이면 빨라지지만(5개에서 ~20%) 모든 지표가 ~0.4% 나빠졌다.
-// 예측 오차 순서로 비교하는 것만으로도 앞선 후보가 기준점이 되어 조기 종료가 잘 걸린다.
-const i4Candidates = nBModes
 
 type block4Result struct {
 	mode   uint8
@@ -177,51 +201,59 @@ type block4Result struct {
 	score  rdScore
 }
 
-// pickBlock4는 한 4×4 블록의 모드를 λ_i4 점수로 고른다.
-// 예측 오차(SSE)와 모드 비용으로 후보를 먼저 줄인 뒤, 남은 후보만 양자화·복원해 RD 점수로 비교한다.
+// pickBlock4는 한 4×4 블록의 10개 모드를 λ_i4 점수로 비교해 고른다.
+// 예측 오차(SSE)와 모드 비용이 가장 작은 모드를 먼저 끝까지 계산해 기준점으로 삼으면,
+// 나머지 모드 대부분이 싼 항만 보고 조기 종료된다. (후보를 오차 순으로 몇 개만 남기면 ~20% 빨라지지만
+// 모든 지표가 ~0.4% 나빠져서 전부 비교한다.)
 func (e *rowCoder) pickBlock4(q *quantizer, lam *rdLambdas, ws *lumaWorkspace, sx, sy, bx, by int,
 	above, left uint8, ctx int) block4Result {
 	edges := ws.edges4(bx, by)
 	var preds [nBModes][16]uint8
-	var order [nBModes]int
-	var est [nBModes]int64
+	first, firstEst := 0, int64(math.MaxInt64)
 	for m := range nBModes {
 		preds[m] = pred4(m, &edges)
-		est[m] = rdDistoMult*predSSE4(e.src.y, e.src.ys, sx, sy, &preds[m]) + lam.i4*bmodeCost[above][left][m]
-		// 삽입 정렬 — 원소가 10개뿐이다
-		k := m
-		for ; k > 0 && est[order[k-1]] > est[m]; k-- {
-			order[k] = order[k-1]
+		est := rdDistoMult*predSSE4(e.src.y, e.src.ys, sx, sy, &preds[m]) + lam.i4*bmodeCost[above][left][m]
+		if est < firstEst {
+			first, firstEst = m, est
 		}
-		order[k] = m
 	}
-	var best block4Result
-	for i, m := range order[:i4Candidates] {
-		c := block4Result{mode: uint8(m)}
-		c.levels, c.rec = quantBlock(&q.y1, e.src.y, e.src.ys, sx, sy, &preds[m])
-		// 점수의 항은 모두 0 이상이므로, 싼 항만으로 이미 최선보다 나쁘면 나머지는 셀 필요가 없다
-		c.score.d = regionSSE(e.src.y, e.src.ys, sx, sy, c.rec[:], 4)
-		c.score.h = bmodeCost[above][left][m]
-		c.score.setScore(lam.i4)
-		if i > 0 && c.score.score >= best.score.score {
+	best := e.tryBlock4(q, lam, &preds[first], first, sx, sy, bx, by, above, left, ctx, math.MaxInt64)
+	for m := range nBModes {
+		if m == first {
 			continue
 		}
-		c.score.sd = regionTDisto(c.rec[:], 4, lam.t, e.srcT[by*4+bx:])
-		if m > 0 && isFlat([][16]int32{c.levels}, flatnessLimitI4) {
-			c.score.r = flatnessPenalty
-		}
-		c.score.setScore(lam.i4)
-		if i > 0 && c.score.score >= best.score.score {
-			continue
-		}
-		r, _ := e.costs.residual(&c.levels, planeY1SansY2, ctx, 0)
-		c.score.r += r
-		c.score.setScore(lam.i4)
-		if i == 0 || c.score.score < best.score.score {
+		if c := e.tryBlock4(q, lam, &preds[m], m, sx, sy, bx, by, above, left, ctx, best.score.score); c.score.score < best.score.score {
 			best = c
 		}
 	}
 	return best
+}
+
+// tryBlock4는 모드 m의 RD 점수를 낸다. 점수의 항은 모두 0 이상이므로, 싼 항까지의 합이
+// limit 이상이 되면 그 자리에서 멈추고 limit 이상인 점수를 돌려준다.
+func (e *rowCoder) tryBlock4(q *quantizer, lam *rdLambdas, pred *[16]uint8, m, sx, sy, bx, by int,
+	above, left uint8, ctx int, limit int64) block4Result {
+	c := block4Result{mode: uint8(m)}
+	c.score.h = bmodeCost[above][left][m]
+	if c.score.setScore(lam.i4); c.score.score >= limit {
+		return c
+	}
+	c.levels, c.rec = quantBlock(&q.y1, e.src.y, e.src.ys, sx, sy, pred)
+	c.score.d = regionSSE(e.src.y, e.src.ys, sx, sy, c.rec[:], 4)
+	if c.score.setScore(lam.i4); c.score.score >= limit {
+		return c
+	}
+	c.score.sd = regionTDisto(c.rec[:], 4, lam.t, e.srcT[by*4+bx:])
+	if m > 0 && isFlat([][16]int32{c.levels}, flatnessLimitI4) {
+		c.score.r = flatnessPenalty
+	}
+	if c.score.setScore(lam.i4); c.score.score >= limit {
+		return c
+	}
+	r, _ := e.costs.residual(&c.levels, planeY1SansY2, ctx, 0)
+	c.score.r += r
+	c.score.setScore(lam.i4)
+	return c
 }
 
 // predSSE4는 원본 4×4와 예측의 제곱 오차 합이다.
@@ -257,10 +289,13 @@ func (e *rowCoder) pickUV(mb *mbInfo, q *quantizer, lam *rdLambdas, mbx, mby int
 			s.d += e.quantChroma(&c, q, pl, predict(m, &es[ch], uvSize, &buf), uBlockBase+ch*4, cx, cy, rec[ch][:])
 		}
 		s.h = uvModeCost[m]
-		s.r = e.chromaRate(&c, mbx)
 		if m > 0 && isFlat(c.levels[uBlockBase:uBlockBase+nUVBlocks], flatnessLimitUV) {
-			s.r += flatnessPenalty * nUVBlocks
+			s.r = flatnessPenalty * nUVBlocks
 		}
+		if s.setScore(lam.uv); m > 0 && s.score >= best.score {
+			continue
+		}
+		s.r += e.chromaRate(&c, mbx)
 		s.setScore(lam.uv)
 		if m == 0 || s.score < best.score {
 			best, bestMB, bestRec = s, c, rec
@@ -281,8 +316,7 @@ func (e *rowCoder) quantChroma(mb *mbInfo, q *quantizer, src, pred []uint8, base
 		mb.levels[base+b], px = quantBlock(&q.uv, src, e.src.cs, cx+bx, cy+by, &p)
 		copyBlock(rec, uvSize, bx, by, px[:], 4)
 	}
-	d, _ := regionDisto(src, e.src.cs, cx, cy, rec, uvSize, 0, nil)
-	return d
+	return regionSSE(src, e.src.cs, cx, cy, rec, uvSize)
 }
 
 func (e *rowCoder) chromaRate(mb *mbInfo, mbx int) int64 {

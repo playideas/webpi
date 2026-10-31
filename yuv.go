@@ -37,26 +37,41 @@ func toYUV420(m image.Image) *yuvPlanes {
 	p.y = make([]uint8, p.ys*p.mbh*16)
 	p.u = make([]uint8, p.cs*p.mbh*8)
 	p.v = make([]uint8, p.cs*p.mbh*8)
-	rgb := rgbReader(m)
-	parallelRows(p.mbh*16, func(y int) {
-		for x := range p.mbw * 16 {
-			r, g, bl := rgb(min(x, p.w-1), min(y, p.h-1))
-			p.y[y*p.ys+x] = uint8((yR*r + yG*g + yB*bl + yuvHalf + yOffset) >> yuvFix)
+	read := rgbRowReader(m)
+	// 색차 한 행은 휘도 두 행에서 나오므로 두 행씩 묶어 읽는다
+	parallelRows(p.mbh*8, func(cy int) {
+		var rows [2][]uint8
+		for k := range rows {
+			rows[k] = make([]uint8, p.ys*rgbBytes)
+			read(min(2*cy+k, p.h-1), rows[k])
+			lumaRow(p.y[(2*cy+k)*p.ys:(2*cy+k+1)*p.ys], rows[k])
 		}
-	})
-	parallelRows(p.mbh*8, func(y int) {
-		for x := range p.mbw * 8 {
-			var sr, sg, sb int
-			for _, d := range [4][2]int{{0, 0}, {1, 0}, {0, 1}, {1, 1}} {
-				r, g, bl := rgb(min(2*x+d[0], p.w-1), min(2*y+d[1], p.h-1))
-				sr, sg, sb = sr+gammaToLinear[r], sg+gammaToLinear[g], sb+gammaToLinear[bl]
-			}
-			sr, sg, sb = linearToGamma(sr), linearToGamma(sg), linearToGamma(sb)
-			p.u[y*p.cs+x] = clipUV(uR*sr + uG*sg + uB*sb)
-			p.v[y*p.cs+x] = clipUV(vR*sr + vG*sg + vB*sb)
-		}
+		chromaRow(p.u[cy*p.cs:(cy+1)*p.cs], p.v[cy*p.cs:(cy+1)*p.cs], &rows)
 	})
 	return p
+}
+
+const rgbBytes = 3
+
+func lumaRow(dst, rgb []uint8) {
+	for x := range dst {
+		r, g, bl := int(rgb[x*rgbBytes]), int(rgb[x*rgbBytes+1]), int(rgb[x*rgbBytes+2])
+		dst[x] = uint8((yR*r + yG*g + yB*bl + yuvHalf + yOffset) >> yuvFix)
+	}
+}
+
+func chromaRow(u, v []uint8, rows *[2][]uint8) {
+	for x := range u {
+		var s [rgbBytes]int
+		for _, row := range rows {
+			for c := range rgbBytes {
+				s[c] += gammaToLinear[row[2*x*rgbBytes+c]] + gammaToLinear[row[(2*x+1)*rgbBytes+c]]
+			}
+		}
+		sr, sg, sb := linearToGamma(s[0]), linearToGamma(s[1]), linearToGamma(s[2])
+		u[x] = clipUV(uR*sr + uG*sg + uB*sb)
+		v[x] = clipUV(vR*sr + vG*sg + vB*sb)
+	}
 }
 
 // 색차 2×2 평균은 감마를 푼 선형 공간에서 낸다 — 밝기 경계에서 평균이 어두운 쪽으로 쏠려
@@ -96,30 +111,43 @@ func clipUV(v int) uint8 {
 	return clip8(int32((v + uvRound + uvOffset) >> (yuvFix + 2)))
 }
 
-// rgbReader는 원점 기준 좌표로 8비트 RGB를 읽는 함수를 돌려준다. 흔한 타입은 빠른 경로.
-func rgbReader(m image.Image) func(x, y int) (int, int, int) {
+// rgbRowReader는 원점 기준 행 y를 RGB 3바이트씩 dst에 채우는 함수를 돌려준다.
+// dst가 이미지보다 넓으면 마지막 픽셀을 복제한다. 흔한 타입은 Pix를 직접 읽는다.
+func rgbRowReader(m image.Image) func(y int, dst []uint8) {
 	b := m.Bounds()
-	switch img := m.(type) {
-	case *image.RGBA:
-		return func(x, y int) (int, int, int) {
-			i := img.PixOffset(b.Min.X+x, b.Min.Y+y)
-			return int(img.Pix[i]), int(img.Pix[i+1]), int(img.Pix[i+2])
-		}
-	case *image.NRGBA:
-		return func(x, y int) (int, int, int) {
-			i := img.PixOffset(b.Min.X+x, b.Min.Y+y)
-			return int(img.Pix[i]), int(img.Pix[i+1]), int(img.Pix[i+2])
-		}
-	case *image.YCbCr:
-		// JPEG 디코더의 출력 — At은 픽셀마다 인터페이스 값을 할당하므로 피한다
-		return func(x, y int) (int, int, int) {
-			c := img.YCbCrAt(b.Min.X+x, b.Min.Y+y)
-			r, g, bl := color.YCbCrToRGB(c.Y, c.Cb, c.Cr)
-			return int(r), int(g), int(bl)
+	w := b.Dx()
+	fill := func(dst []uint8, px func(x int) (uint8, uint8, uint8)) {
+		for x := range len(dst) / rgbBytes {
+			dst[x*rgbBytes], dst[x*rgbBytes+1], dst[x*rgbBytes+2] = px(min(x, w-1))
 		}
 	}
-	return func(x, y int) (int, int, int) {
-		c := color.NRGBAModel.Convert(m.At(b.Min.X+x, b.Min.Y+y)).(color.NRGBA)
-		return int(c.R), int(c.G), int(c.B)
+	switch img := m.(type) {
+	case *image.RGBA:
+		return func(y int, dst []uint8) { copyRGB(dst, img.Pix[img.PixOffset(b.Min.X, b.Min.Y+y):], w) }
+	case *image.NRGBA:
+		return func(y int, dst []uint8) { copyRGB(dst, img.Pix[img.PixOffset(b.Min.X, b.Min.Y+y):], w) }
+	case *image.YCbCr:
+		// JPEG 디코더의 출력 — At은 픽셀마다 인터페이스 값을 할당하므로 피한다
+		return func(y int, dst []uint8) {
+			fill(dst, func(x int) (uint8, uint8, uint8) {
+				c := img.YCbCrAt(b.Min.X+x, b.Min.Y+y)
+				return color.YCbCrToRGB(c.Y, c.Cb, c.Cr)
+			})
+		}
+	}
+	return func(y int, dst []uint8) {
+		fill(dst, func(x int) (uint8, uint8, uint8) {
+			c := color.NRGBAModel.Convert(m.At(b.Min.X+x, b.Min.Y+y)).(color.NRGBA)
+			return c.R, c.G, c.B
+		})
+	}
+}
+
+// copyRGB는 RGBA 배치(4바이트) 행의 앞 w픽셀에서 알파를 버리고 dst에 옮긴 뒤, 남은 폭은 마지막 픽셀로 채운다.
+func copyRGB(dst, row []uint8, w int) {
+	const bpp = 4
+	for x := range len(dst) / rgbBytes {
+		i := min(x, w-1) * bpp
+		dst[x*rgbBytes], dst[x*rgbBytes+1], dst[x*rgbBytes+2] = row[i], row[i+1], row[i+2]
 	}
 }
