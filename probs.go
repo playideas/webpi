@@ -10,32 +10,55 @@ const (
 	probScale     = 256
 )
 
+// nzContext는 0이 아닌 계수 유무 문맥이다: 0~3 휘도 열/행, 4~5 U, 6~7 V, 8 Y2.
+type nzContext [9]int
+
+const nzY2 = 8
+
 // writeTokens는 모든 매크로블록의 계수 토큰을 래스터 순서로 쓴다 (문맥은 디코더와 같게 유지).
 func (e *encoder) writeTokens(w *tokenWriter) {
-	// 문맥 배열: 0~3 휘도 열/행, 4~5 U, 6~7 V, 8 Y2
-	top := make([][9]int, e.src.mbw)
+	top := make([]nzContext, e.src.mbw)
 	for mby := range e.src.mbh {
-		var left [9]int
+		var left nzContext
 		for mbx := range e.src.mbw {
 			mb := &e.mbs[mby*e.src.mbw+mbx]
 			if mb.skip && e.useSkip {
-				top[mbx], left = [9]int{}, [9]int{}
+				skipContext(mb, &top[mbx], &left)
 				continue
 			}
-			writeMBTokens(w, mb, &top[mbx], &left)
+			writeLumaTokens(w, mb, &top[mbx], &left)
+			writeChromaTokens(w, mb, &top[mbx], &left)
 		}
 	}
 }
 
-func writeMBTokens(w *tokenWriter, mb *mbInfo, top, left *[9]int) {
-	nz := w.block(&mb.levels[y2Block], planeY2, top[8]+left[8], 0)
-	top[8], left[8] = nz, nz
+// skipContext는 건너뛴 매크로블록의 문맥을 비운다. Y2가 없는 i4 블록은 Y2 문맥을 그대로 둔다.
+func skipContext(mb *mbInfo, top, left *nzContext) {
+	for i := range nzY2 {
+		top[i], left[i] = 0, 0
+	}
+	if !mb.i4 {
+		top[nzY2], left[nzY2] = 0, 0
+	}
+}
+
+// writeLumaTokens는 (i16이면 Y2 다음) 휘도 블록 16개를 쓴다.
+func writeLumaTokens(w *tokenWriter, mb *mbInfo, top, left *nzContext) {
+	plane, first := planeY1SansY2, 0
+	if !mb.i4 {
+		nz := w.block(&mb.levels[y2Block], planeY2, top[nzY2]+left[nzY2], 0)
+		top[nzY2], left[nzY2] = nz, nz
+		plane, first = planeY1WithY2, 1
+	}
 	for y := range 4 {
 		for x := range 4 {
-			nz := w.block(&mb.levels[y*4+x], planeY1WithY2, top[x]+left[y], 1)
+			nz := w.block(&mb.levels[y*4+x], plane, top[x]+left[y], first)
 			top[x], left[y] = nz, nz
 		}
 	}
+}
+
+func writeChromaTokens(w *tokenWriter, mb *mbInfo, top, left *nzContext) {
 	for ch, base := range [2]int{uBlockBase, vBlockBase} {
 		for y := range 2 {
 			for x := range 2 {

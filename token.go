@@ -23,11 +23,13 @@ type probTable = [nPlane][nBand][nContext][nProb]uint8
 // tokenStats는 확률 노드별 0/1 횟수 — 프레임 확률 갱신을 정할 때 쓴다.
 type tokenStats = [nPlane][nBand][nContext][nProb][2]uint32
 
-// tokenWriter는 계수 토큰을 쓴다. enc가 nil이면 통계만 모은다.
+// tokenWriter는 계수 토큰을 쓴다. enc·stats·rate 중 nil이 아닌 것에만 반영한다
+// (비트 쓰기, 노드별 횟수, 비용 누적). 모두 nil이면 문맥 계산만 한다.
 type tokenWriter struct {
 	enc   *boolEncoder
 	probs *probTable
 	stats *tokenStats
+	rate  *int64
 }
 
 func (w *tokenWriter) node(plane, band, ctx, i int, bit bool) {
@@ -37,11 +39,17 @@ func (w *tokenWriter) node(plane, band, ctx, i int, bit bool) {
 	if w.enc != nil {
 		w.enc.putBit(w.probs[plane][band][ctx][i], bit)
 	}
+	if w.rate != nil {
+		*w.rate += bitCost256(w.probs[plane][band][ctx][i], bit)
+	}
 }
 
 func (w *tokenWriter) fixed(prob uint8, bit bool) {
 	if w.enc != nil {
 		w.enc.putBit(prob, bit)
+	}
+	if w.rate != nil {
+		*w.rate += bitCost256(prob, bit)
 	}
 }
 

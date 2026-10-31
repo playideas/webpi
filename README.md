@@ -70,5 +70,8 @@ libwebp 기능을 하나씩 끄거나 바꿔 잰 결과(libwebp 기본 `-m 4` �
 |---|---|---|---|
 | 골격: i16 예측(SSE 최소), 고정 양자화, 루프 필터 끔, 토큰 확률 갱신 | 34.89KB | +25.5% | `bench/results/webpi-skeleton.txt` |
 | + 세그먼트 적응 양자화: DCT 분포로 MB 민감도 → k-means 4 세그먼트, SNS 50으로 세그먼트별 양자화, 색차 DC/AC 델타 | 33.30KB | +19.8% | `bench/results/webpi-segments.txt` |
+| + RD 모드 결정과 i4: i16·i4(10모드)·색차를 (왜곡 + 텍스처 왜곡 + λ·비트) 점수로 선택, λ·평탄도 벌점은 libwebp method 4와 같게 | 27.94KB | +0.5% | `bench/results/webpi-rd-i4.txt` |
 
-골격 출력은 dwebp `-yuv` 결과가 인코더의 복원 평면과 비트 단위로 같다 (`Test_encodeFrame_noLoopFilter_dwebpYUVMatchesReconstructionExactly`).
+모든 단계에서 dwebp `-yuv` 결과가 인코더의 복원 평면과 비트 단위로 같다 (`Test_encodeFrame_noLoopFilter_dwebpYUVMatchesReconstructionExactly`).
+
+속도(`-j 1` 직렬, q75 장당): webpi 44.5ms, deepteams 7.5ms, libwebp 37.6ms(cwebp 프로세스 실행 포함). RD·i4 도입으로 webpi가 deepteams의 약 6배 — 합격 기준 4(같은 자릿수) 안이지만 여유가 적다.

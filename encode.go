@@ -20,17 +20,6 @@ const (
 	filterLevelBits  = 6
 )
 
-// 휘도 16×16 모드 선택 비트 확률 — RFC 6386 11.2 (키 프레임 고정값)
-const (
-	probIsI16    = 145
-	probYModeA   = 156
-	probYModeDC  = 163
-	probYModeHE  = 128
-	probUVModeA  = 142
-	probUVModeVE = 114
-	probUVModeHE = 183
-)
-
 // Options는 인코딩 설정이다.
 type Options struct {
 	// Quality는 0~100. 클수록 화질이 높고 파일이 크다.
@@ -40,6 +29,11 @@ type Options struct {
 type encoder struct {
 	src, rec *yuvPlanes
 	seg      segmentation
+	lambdas  [nSegments]rdLambdas
+	// 인코딩 중 비용 계산에 쓰는 문맥 (디코더가 보는 것과 같다)
+	nzTop    []nzContext
+	nzLeft   nzContext
+	modes    *modeContext
 	mbs      []mbInfo
 	probs    probTable
 	useSkip  bool
@@ -70,7 +64,12 @@ func encodeFrame(m image.Image, quality float32) (*encoder, []byte, error) {
 	e := &encoder{src: src, seg: newSegmentation(src, quality), probs: defaultTokenProb}
 	e.rec = &yuvPlanes{w: e.src.w, h: e.src.h, mbw: e.src.mbw, mbh: e.src.mbh, ys: e.src.ys, cs: e.src.cs,
 		y: make([]uint8, len(e.src.y)), u: make([]uint8, len(e.src.u)), v: make([]uint8, len(e.src.v))}
+	for n := range nSegments {
+		e.lambdas[n] = newRDLambdas(&e.seg.quant[n])
+	}
+	e.nzTop, e.modes = make([]nzContext, src.mbw), newModeContext(src.mbw)
 	for mby := range e.src.mbh {
+		e.nzLeft, e.modes.left = nzContext{}, [4]uint8{}
 		for mbx := range e.src.mbw {
 			e.mbs = append(e.mbs, e.encodeMB(mbx, mby))
 		}
@@ -141,31 +140,6 @@ func (e *encoder) writeHeader(h *boolEncoder, stats *tokenStats) {
 	h.putBit(uniformProb, e.useSkip)
 	if e.useSkip {
 		h.putUint(uint32(e.skipProb), 8)
-	}
-}
-
-// writeModes는 매크로블록별 skip 플래그와 예측 모드를 쓴다.
-func (e *encoder) writeModes(h *boolEncoder) {
-	for i := range e.mbs {
-		mb := &e.mbs[i]
-		e.writeSegmentID(h, e.seg.ids[i])
-		if e.useSkip {
-			h.putBit(e.skipProb, mb.skip)
-		}
-		h.putBit(probIsI16, true)
-		h.putBit(probYModeA, mb.yMode == predHE || mb.yMode == predTM)
-		if mb.yMode == predDC || mb.yMode == predVE {
-			h.putBit(probYModeDC, mb.yMode == predVE)
-		} else {
-			h.putBit(probYModeHE, mb.yMode == predTM)
-		}
-		h.putBit(probUVModeA, mb.uvMode != predDC)
-		if mb.uvMode != predDC {
-			h.putBit(probUVModeVE, mb.uvMode != predVE)
-			if mb.uvMode != predVE {
-				h.putBit(probUVModeHE, mb.uvMode == predTM)
-			}
-		}
 	}
 }
 
