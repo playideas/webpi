@@ -18,22 +18,26 @@ const nzY2 = 8
 // writeTokens는 모든 매크로블록의 계수 토큰을 래스터 순서로 쓴다 (문맥은 디코더와 같게 유지).
 func (e *encoder) writeTokens(w *tokenWriter) {
 	top := make([]nzContext, e.src.mbw)
+	var mb mbInfo
 	for mby := range e.src.mbh {
 		var left nzContext
+		coefs := e.coefs[mby]
 		for mbx := range e.src.mbw {
-			mb := &e.mbs[mby*e.src.mbw+mbx]
-			if mb.skip && e.useSkip {
-				skipContext(mb, &top[mbx], &left)
+			mb.mbHeader = e.mbs[mby*e.src.mbw+mbx]
+			// useSkip이 꺼져 있으면 건너뛸 매크로블록이 하나도 없다
+			if mb.skip {
+				skipContext(&mb.mbHeader, &top[mbx], &left)
 				continue
 			}
-			writeLumaTokens(w, mb, &top[mbx], &left)
-			writeChromaTokens(w, mb, &top[mbx], &left)
+			coefs = unpackLevels(coefs, &mb.levels)
+			writeLumaTokens(w, &mb, &top[mbx], &left)
+			writeChromaTokens(w, &mb, &top[mbx], &left)
 		}
 	}
 }
 
 // skipContext는 건너뛴 매크로블록의 문맥을 비운다. Y2가 없는 i4 블록은 Y2 문맥을 그대로 둔다.
-func skipContext(mb *mbInfo, top, left *nzContext) {
+func skipContext(mb *mbHeader, top, left *nzContext) {
 	for i := range nzY2 {
 		top[i], left[i] = 0, 0
 	}

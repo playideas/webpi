@@ -14,14 +14,19 @@ const (
 	nUVBlocks  = 8
 )
 
-// mbInfo는 한 매크로블록의 결정과 양자화 레벨이다.
+// mbHeader는 한 매크로블록의 모드 결정이다. 프레임 배열에는 이것만 남기고 계수는 행 버퍼에 압축해 둔다.
 // i4가 아니면 bModes는 yMode로 채워 둔다 (이웃의 4×4 모드 문맥).
-type mbInfo struct {
+type mbHeader struct {
 	yMode, uvMode int
 	i4            bool
 	bModes        [nYBlocks]uint8
-	levels        [nBlocks][16]int32
 	skip          bool
+}
+
+// mbInfo는 인코딩 중인 매크로블록의 결정과 양자화 레벨이다.
+type mbInfo struct {
+	mbHeader
+	levels [nBlocks][16]int32
 }
 
 // rowCoder는 한 매크로블록 행을 인코딩하는 작업자다. 행 안에서만 이어지는 문맥(왼쪽 이웃)과
@@ -33,6 +38,7 @@ type rowCoder struct {
 	srcT   [nYBlocks]int32
 	ws     lumaWorkspace // i4 탐색용, 매크로블록마다 다시 채운다
 	stats  *tokenStats   // 이 행의 토큰 통계 — 프레임 확률 갱신에 쓴다
+	coefs  *[]int16      // 이 행의 압축 계수 (packLevels)
 	// 휘도 후보 작업 공간 — 2KB짜리 결과를 값으로 주고받지 않도록 행마다 한 벌 둔다
 	i16 [2]lumaResult
 	i4  lumaResult
@@ -46,10 +52,17 @@ type lumaResult struct {
 	score rdScore
 }
 
+// reset은 다음 후보를 위해 결정과 점수를 비운다. 레벨·복원 픽셀은 후보가 쓰는 칸을 모두 덮어쓰고
+// 쓰지 않는 칸(i16의 색차, i4의 Y2·색차)은 처음부터 0이라 지우지 않는다 — 매크로블록마다 ~10KB를 아낀다.
+func (c *lumaResult) reset() {
+	c.mb.mbHeader = mbHeader{}
+	c.score = rdScore{}
+}
+
 // encodeMB는 (mbx,mby) 매크로블록의 모드를 RD 점수로 고르고 양자화한 뒤 rec에 복원값을 쓴다.
 // 복원은 디코더와 비트 단위로 같아야 다음 블록의 예측이 어긋나지 않는다.
 // 판단 PD-20261031-873a974c: i4 예측과 RD(왜곡 + λ·비트) 모드 결정을 함께 넣는다
-func (e *rowCoder) encodeMB(mbx, mby int, out *mbInfo) {
+func (e *rowCoder) encodeMB(mbx, mby int, out *mbHeader) {
 	seg := e.seg.ids[mby*e.src.mbw+mbx]
 	q, lam := &e.seg.quant[seg], &e.lambdas[seg]
 	// 원본 쪽 텍스처 변환은 모드와 무관하므로 매크로블록마다 한 번만 구한다
@@ -80,8 +93,12 @@ func (e *rowCoder) encodeMB(mbx, mby int, out *mbInfo) {
 	}
 	writeLumaTokens(&w, mb, &e.nzTop[mbx], &e.nzLeft)
 	writeChromaTokens(&w, mb, &e.nzTop[mbx], &e.nzLeft)
-	e.modes.update(mb, mbx)
-	*out = *mb
+	e.modes.update(&mb.mbHeader, mbx)
+	// 프레임 전체 레벨(매크로블록당 1.6KB)을 그대로 쓰면 메모리 쓰기가 인코딩 시간의 ~8%를 먹는다
+	*out = mb.mbHeader
+	if !mb.skip {
+		*e.coefs = packLevels(*e.coefs, &mb.levels)
+	}
 }
 
 // pickI16은 16×16 모드 4개 중 λ_i16 점수가 가장 낮은 것을 고르고, i4와 비교할 수 있게 λ_mode로 다시 매긴다.
@@ -96,7 +113,7 @@ func (e *rowCoder) pickI16(q *quantizer, lam *rdLambdas, mbx, mby int) *lumaResu
 		if m == 0 {
 			c = best
 		}
-		*c = lumaResult{}
+		c.reset()
 		c.mb.yMode = m
 		e.quantLuma16(q, predict(m, &ye, mbSize, &buf), x0, y0, c)
 		c.score.d = regionSSE(e.src.y, e.src.ys, x0, y0, c.rec[:], mbSize)
@@ -169,14 +186,14 @@ func (e *rowCoder) pickI4(q *quantizer, lam *rdLambdas, mbx, mby int, limit int6
 	ws := &e.ws
 	ws.load(e.rec, mbx, mby)
 	res := &e.i4
-	*res = lumaResult{}
+	res.reset()
 	res.mb.i4 = true
 	res.score.h = i4HeaderCost
 	res.score.setScore(lam.mode)
 	tnz, lnz := e.nzTop[mbx], e.nzLeft
 	for b := range nYBlocks {
 		bx, by := b%4, b/4
-		above, left := e.modes.neighbors(&res.mb, mbx, b)
+		above, left := e.modes.neighbors(&res.mb.mbHeader, mbx, b)
 		blk := e.pickBlock4(q, lam, ws, mbx*mbSize+bx*4, mby*mbSize+by*4, bx, by, above, left, tnz[bx]+lnz[by])
 		blk.score.setScore(lam.mode)
 		res.score.add(&blk.score)
@@ -201,32 +218,55 @@ type block4Result struct {
 	score  rdScore
 }
 
-// pickBlock4는 한 4×4 블록의 10개 모드를 λ_i4 점수로 비교해 고른다.
-// 예측 오차(SSE)와 모드 비용이 가장 작은 모드를 먼저 끝까지 계산해 기준점으로 삼으면,
-// 나머지 모드 대부분이 싼 항만 보고 조기 종료된다. (후보를 오차 순으로 몇 개만 남기면 ~20% 빨라지지만
-// 모든 지표가 ~0.4% 나빠져서 전부 비교한다.)
+// i4 블록마다 끝까지 계산하는 모드 수. 나머지는 추정 점수만 보고 버린다.
+const i4Candidates = 5
+
+// pickBlock4는 한 4×4 블록에서 추정 점수가 낮은 모드 i4Candidates개만 λ_i4 점수로 비교해 고른다.
+// 추정 점수 λ·(모드 비용 + SATD/q)는 예측 잔차의 하다마드 절대합을 양자화 단계로 나눈 값을 비트 수의
+// 근사로 쓴다 — 실제 승자를 상위 5개 안에 넣지 못해 잃는 RD 점수가 SSE 기준의 ~40%다 (COCO 16장 측정).
+// λ는 두 항에 같이 곱해지므로 순위에는 h·q + 256·SATD만 쓴다.
+// 추정이 가장 좋은 모드를 먼저 끝까지 계산해 기준점으로 삼으면 나머지는 싼 항만 보고 조기 종료되기도 한다.
 func (e *rowCoder) pickBlock4(q *quantizer, lam *rdLambdas, ws *lumaWorkspace, sx, sy, bx, by int,
 	above, left uint8, ctx int) block4Result {
 	edges := ws.edges4(bx, by)
 	var preds [nBModes][16]uint8
-	first, firstEst := 0, int64(math.MaxInt64)
+	var order [nBModes]modeEst
+	qac := int64(q.y1.q[1])
 	for m := range nBModes {
 		preds[m] = pred4(m, &edges)
-		est := rdDistoMult*predSSE4(e.src.y, e.src.ys, sx, sy, &preds[m]) + lam.i4*bmodeCost[above][left][m]
-		if est < firstEst {
-			first, firstEst = m, est
-		}
+		order[m] = modeEst{bmodeCost[above][left][m]*qac + costOne*satd4(e.src.y, e.src.ys, sx, sy, &preds[m]), uint8(m)}
 	}
-	best := e.tryBlock4(q, lam, &preds[first], first, sx, sy, bx, by, above, left, ctx, math.MaxInt64)
-	for m := range nBModes {
-		if m == first {
-			continue
-		}
+	selectLowest(&order, i4Candidates)
+	m := int(order[0].m)
+	best := e.tryBlock4(q, lam, &preds[m], m, sx, sy, bx, by, above, left, ctx, math.MaxInt64)
+	for _, o := range order[1:i4Candidates] {
+		m := int(o.m)
 		if c := e.tryBlock4(q, lam, &preds[m], m, sx, sy, bx, by, above, left, ctx, best.score.score); c.score.score < best.score.score {
 			best = c
 		}
 	}
 	return best
+}
+
+type modeEst struct {
+	est int64
+	m   uint8
+}
+
+// selectLowest는 앞쪽 k칸에 추정값이 가장 낮은 k개를 오름차순으로 모은다 (같으면 모드 번호 순).
+func selectLowest(o *[nBModes]modeEst, k int) {
+	for i := range k {
+		lo := i
+		for j := i + 1; j < len(o); j++ {
+			if o[j].est < o[lo].est {
+				lo = j
+			}
+		}
+		// 앞으로 당겨 순서를 유지한다 — 교환하면 같은 추정값끼리의 모드 순서가 바뀐다
+		v := o[lo]
+		copy(o[i+1:lo+1], o[i:lo])
+		o[i] = v
+	}
 }
 
 // tryBlock4는 모드 m의 RD 점수를 낸다. 점수의 항은 모두 0 이상이므로, 싼 항까지의 합이
@@ -256,19 +296,6 @@ func (e *rowCoder) tryBlock4(q *quantizer, lam *rdLambdas, pred *[16]uint8, m, s
 	return c
 }
 
-// predSSE4는 원본 4×4와 예측의 제곱 오차 합이다.
-func predSSE4(src []uint8, s, x, y int, pred *[16]uint8) int64 {
-	var d int64
-	for j := range 4 {
-		row := src[(y+j)*s+x : (y+j)*s+x+4]
-		for i, v := range row {
-			e := int64(v) - int64(pred[j*4+i])
-			d += e * e
-		}
-	}
-	return d
-}
-
 // pickUV는 색차 모드 4개 중 λ_uv 점수가 가장 낮은 것을 골라 mb와 rec에 반영한다.
 // 색차에는 텍스처 왜곡을 쓰지 않는다 — 면을 평탄하게 만드는 경향이 있다 (libwebp와 같음).
 func (e *rowCoder) pickUV(mb *mbInfo, q *quantizer, lam *rdLambdas, mbx, mby int) {
@@ -282,7 +309,7 @@ func (e *rowCoder) pickUV(mb *mbInfo, q *quantizer, lam *rdLambdas, mbx, mby int
 	var bestRec [2][uvSize * uvSize]uint8
 	var buf predBuf
 	for m := range nPredModes {
-		c := mbInfo{uvMode: m}
+		c := mbInfo{mbHeader: mbHeader{uvMode: m}}
 		var rec [2][uvSize * uvSize]uint8
 		var s rdScore
 		for ch, pl := range [2][]uint8{e.src.u, e.src.v} {

@@ -59,7 +59,7 @@ func (h *histogram) alpha() int {
 func mbAlphas(src *yuvPlanes) (alphas []int, uvAlphaAvg int) {
 	alphas = make([]int, src.mbw*src.mbh)
 	uvRows := make([]int, src.mbh)
-	parallelRows(src.mbh, func(mby int) {
+	parallelRows(src.mbh, func(_, mby int) {
 		for mbx := range src.mbw {
 			ya, uva := mbRawAlphas(src, mbx, mby)
 			a := (lumaAlphaWeight*ya + uva + 1<<(alphaMixShift-1)) >> alphaMixShift

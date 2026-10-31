@@ -39,14 +39,18 @@ func toYUV420(m image.Image) *yuvPlanes {
 	p.v = make([]uint8, p.cs*p.mbh*8)
 	read := rgbRowReader(m)
 	// 색차 한 행은 휘도 두 행에서 나오므로 두 행씩 묶어 읽는다
-	parallelRows(p.mbh*8, func(cy int) {
-		var rows [2][]uint8
+	n := p.mbh * 8
+	bufs := make([][2][]uint8, rowWorkers(n))
+	for w := range bufs {
+		bufs[w] = [2][]uint8{make([]uint8, p.ys*rgbBytes), make([]uint8, p.ys*rgbBytes)}
+	}
+	parallelRows(n, func(w, cy int) {
+		rows := &bufs[w]
 		for k := range rows {
-			rows[k] = make([]uint8, p.ys*rgbBytes)
 			read(min(2*cy+k, p.h-1), rows[k])
 			lumaRow(p.y[(2*cy+k)*p.ys:(2*cy+k+1)*p.ys], rows[k])
 		}
-		chromaRow(p.u[cy*p.cs:(cy+1)*p.cs], p.v[cy*p.cs:(cy+1)*p.cs], &rows)
+		chromaRow(p.u[cy*p.cs:(cy+1)*p.cs], p.v[cy*p.cs:(cy+1)*p.cs], rows)
 	})
 	return p
 }

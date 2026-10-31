@@ -119,6 +119,25 @@ func ttransform(in []uint8, s int) int32 {
 	return sum
 }
 
+// satd4는 원본과 예측의 4×4 잔차를 하다마드 변환한 계수의 절대합이다.
+func satd4(src []uint8, s, x, y int, pred *[16]uint8) int64 {
+	var tmp [16]int32
+	for j := range 4 {
+		row := src[(y+j)*s+x : (y+j)*s+x+4]
+		r0, r1 := int32(row[0])-int32(pred[j*4]), int32(row[1])-int32(pred[j*4+1])
+		r2, r3 := int32(row[2])-int32(pred[j*4+2]), int32(row[3])-int32(pred[j*4+3])
+		a0, a1, a2, a3 := r0+r2, r1+r3, r1-r3, r0-r2
+		tmp[j*4], tmp[j*4+1], tmp[j*4+2], tmp[j*4+3] = a0+a1, a3+a2, a3-a2, a0-a1
+	}
+	var sum int32
+	for i := range 4 {
+		a0, a1 := tmp[i]+tmp[8+i], tmp[4+i]+tmp[12+i]
+		a2, a3 := tmp[4+i]-tmp[12+i], tmp[i]-tmp[8+i]
+		sum += abs32(a0+a1) + abs32(a3+a2) + abs32(a3-a2) + abs32(a0-a1)
+	}
+	return int64(sum)
+}
+
 func regionSSE(src []uint8, s, x0, y0 int, rec []uint8, n int) int64 {
 	var d int64
 	for j := range n {

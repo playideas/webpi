@@ -15,6 +15,10 @@ const (
 type levelCosts struct {
 	probs probTable
 	lv    [nPlane][nBand][nContext][maxCostLevel + 1]int32
+	// 계수 위치별 사본 — 루프에서 band를 거치지 않는다. at[plane][n][ctx]는 lv[plane][bands[n]][ctx]를 가리키고,
+	// eob[plane][n][ctx]는 위치 n에서 "EOB"(첫 노드 0)를 쓰는 비용이다 (n=16은 쓰지 않는다)
+	at  [nPlane][16][nContext]*[maxCostLevel + 1]int32
+	eob [nPlane][16][nContext]int32
 }
 
 // cat6Extra[v-67]은 범주 6 추가 비트의 비용이다.
@@ -54,35 +58,39 @@ func newLevelCosts(p *probTable) *levelCosts {
 				}
 			}
 		}
+		for n := range 16 {
+			for ctx := range nContext {
+				c.at[plane][n][ctx] = &c.lv[plane][bands[n]][ctx]
+				c.eob[plane][n][ctx] = int32(bitCost256(p[plane][bands[n]][ctx][0], false))
+			}
+		}
 	}
 	return c
 }
 
 // residual은 tokenWriter.block과 같은 토큰열의 비용과, 0이 아닌 계수 유무를 돌려준다.
 func (c *levelCosts) residual(levels *[16]int32, plane, ctx0, first int) (int64, int) {
-	// 지그재그 순서의 크기를 한 번에 모으면서 마지막 0 아닌 위치를 찾는다
-	var z [16]int32
 	last := -1
 	for n := 15; n >= first; n-- {
-		z[n] = abs32(levels[zigzag[n]])
-		if last < 0 && z[n] != 0 {
+		if levels[zigzag[n]] != 0 {
 			last = n
+			break
 		}
 	}
-	p := &c.probs[plane]
-	p0 := p[bands[first]][ctx0][0]
+	eob := &c.eob[plane]
 	if last < 0 {
-		return bitCost256(p0, false), 0
+		return int64(eob[first][ctx0]), 0
 	}
 	var cost int64
 	if ctx0 == 0 {
-		cost = bitCost256(p0, true)
+		// 첫 노드 1(EOB 아님) — ctx>0 칸의 표에는 이미 들어 있다
+		cost = bitCost256(c.probs[plane][bands[first]][0][0], true)
 	}
-	lv := &c.lv[plane]
+	at := &c.at[plane]
 	ctx := ctx0
 	for n := first; n <= last; n++ {
-		v := z[n]
-		t := &lv[bands[n]][ctx]
+		v := abs32(levels[zigzag[n]])
+		t := at[n][ctx]
 		if v <= maxCostLevel {
 			cost += int64(t[v])
 		} else {
@@ -91,7 +99,7 @@ func (c *levelCosts) residual(levels *[16]int32, plane, ctx0, first int) (int64,
 		ctx = int(min(v, 2))
 	}
 	if last < 15 {
-		cost += bitCost256(p[bands[last+1]][ctx][0], false)
+		cost += int64(eob[last+1][ctx])
 	}
 	return cost, 1
 }

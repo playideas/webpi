@@ -1,51 +1,51 @@
 images=150 scale=0.75 jobs=16
 targets ssimY=0.9728 ssimUV=0.9257 psnrYUV=38.33 psnrRGB=33.95
-libwebp        q=40  avgKB=  13.74  ssimY=0.9314 ssimUV=0.9118 psnrYUV=34.44 psnrRGB=31.32  encMs=  66.5
-libwebp        q=50  avgKB=  15.82  ssimY=0.9418 ssimUV=0.9176 psnrYUV=35.31 psnrRGB=32.03  encMs=  73.5
-libwebp        q=60  avgKB=  17.90  ssimY=0.9500 ssimUV=0.9229 psnrYUV=36.07 psnrRGB=32.65  encMs=  71.3
-libwebp        q=70  avgKB=  20.23  ssimY=0.9575 ssimUV=0.9279 psnrYUV=36.86 psnrRGB=33.27  encMs=  71.7
-libwebp        q=75  avgKB=  21.52  ssimY=0.9608 ssimUV=0.9304 psnrYUV=37.29 psnrRGB=33.60  encMs=  70.4
-libwebp        q=80  avgKB=  26.22  ssimY=0.9705 ssimUV=0.9383 psnrYUV=38.67 psnrRGB=34.64  encMs=  72.1
-libwebp        q=85  avgKB=  32.42  ssimY=0.9789 ssimUV=0.9459 psnrYUV=40.17 psnrRGB=35.71  encMs=  70.9
-libwebp        q=90  avgKB=  42.35  ssimY=0.9868 ssimUV=0.9541 psnrYUV=42.12 psnrRGB=37.01  encMs=  70.7
-libwebp        q=95  avgKB=  59.61  ssimY=0.9931 ssimUV=0.9616 psnrYUV=44.45 psnrRGB=38.39  encMs=  75.1
-deepteams      q=40  avgKB=  12.64  ssimY=0.9010 ssimUV=0.9110 psnrYUV=33.13 psnrRGB=30.34  encMs=  35.7
-deepteams      q=50  avgKB=  14.48  ssimY=0.9185 ssimUV=0.9176 psnrYUV=34.19 psnrRGB=31.23  encMs=  37.6
-deepteams      q=60  avgKB=  16.58  ssimY=0.9313 ssimUV=0.9235 psnrYUV=35.06 psnrRGB=31.96  encMs=  37.2
-deepteams      q=70  avgKB=  18.90  ssimY=0.9422 ssimUV=0.9291 psnrYUV=35.92 psnrRGB=32.68  encMs=  41.8
-deepteams      q=75  avgKB=  20.21  ssimY=0.9473 ssimUV=0.9320 psnrYUV=36.39 psnrRGB=33.05  encMs=  39.7
-deepteams      q=80  avgKB=  24.98  ssimY=0.9606 ssimUV=0.9402 psnrYUV=37.88 psnrRGB=34.20  encMs=  43.0
-deepteams      q=85  avgKB=  31.23  ssimY=0.9722 ssimUV=0.9479 psnrYUV=39.49 psnrRGB=35.39  encMs=  46.0
-deepteams      q=90  avgKB=  41.15  ssimY=0.9824 ssimUV=0.9560 psnrYUV=41.52 psnrRGB=36.79  encMs=  51.3
-deepteams      q=95  avgKB=  58.34  ssimY=0.9909 ssimUV=0.9628 psnrYUV=43.96 psnrRGB=38.26  encMs=  61.8
-deepteams-zero q=40  avgKB=  13.52  ssimY=0.9011 ssimUV=0.9140 psnrYUV=33.84 psnrRGB=30.86  encMs=  31.9
-deepteams-zero q=50  avgKB=  15.23  ssimY=0.9168 ssimUV=0.9199 psnrYUV=34.80 psnrRGB=31.68  encMs=  37.1
-deepteams-zero q=60  avgKB=  17.20  ssimY=0.9281 ssimUV=0.9248 psnrYUV=35.58 psnrRGB=32.31  encMs=  36.0
-deepteams-zero q=70  avgKB=  19.67  ssimY=0.9403 ssimUV=0.9312 psnrYUV=36.51 psnrRGB=33.11  encMs=  37.2
-deepteams-zero q=75  avgKB=  20.72  ssimY=0.9436 ssimUV=0.9332 psnrYUV=36.85 psnrRGB=33.38  encMs=  38.4
-deepteams-zero q=80  avgKB=  25.91  ssimY=0.9588 ssimUV=0.9412 psnrYUV=38.40 psnrRGB=34.52  encMs=  41.3
-deepteams-zero q=85  avgKB=  31.21  ssimY=0.9688 ssimUV=0.9481 psnrYUV=39.74 psnrRGB=35.53  encMs=  45.6
-deepteams-zero q=90  avgKB=  39.51  ssimY=0.9797 ssimUV=0.9528 psnrYUV=41.50 psnrRGB=36.62  encMs=  48.9
-deepteams-zero q=95  avgKB=  55.20  ssimY=0.9903 ssimUV=0.9601 psnrYUV=43.94 psnrRGB=38.07  encMs=  56.0
-webpi          q=40  avgKB=  13.41  ssimY=0.9294 ssimUV=0.9155 psnrYUV=34.33 psnrRGB=31.26  encMs=  42.4
-webpi          q=50  avgKB=  15.49  ssimY=0.9402 ssimUV=0.9211 psnrYUV=35.20 psnrRGB=32.00  encMs=  43.9
-webpi          q=60  avgKB=  17.60  ssimY=0.9489 ssimUV=0.9264 psnrYUV=35.99 psnrRGB=32.65  encMs=  42.8
-webpi          q=70  avgKB=  20.03  ssimY=0.9565 ssimUV=0.9317 psnrYUV=36.80 psnrRGB=33.32  encMs=  46.1
-webpi          q=75  avgKB=  21.37  ssimY=0.9599 ssimUV=0.9343 psnrYUV=37.22 psnrRGB=33.65  encMs=  45.1
-webpi          q=80  avgKB=  26.32  ssimY=0.9699 ssimUV=0.9423 psnrYUV=38.63 psnrRGB=34.74  encMs=  46.4
-webpi          q=85  avgKB=  33.26  ssimY=0.9787 ssimUV=0.9504 psnrYUV=40.19 psnrRGB=35.89  encMs=  53.0
-webpi          q=90  avgKB=  44.55  ssimY=0.9867 ssimUV=0.9586 psnrYUV=42.17 psnrRGB=37.25  encMs=  56.2
-webpi          q=95  avgKB=  62.36  ssimY=0.9930 ssimUV=0.9637 psnrYUV=44.45 psnrRGB=38.52  encMs=  55.1
+libwebp        q=40  avgKB=  13.74  ssimY=0.9314 ssimUV=0.9118 psnrYUV=34.44 psnrRGB=31.32  encMs= 111.0
+libwebp        q=50  avgKB=  15.82  ssimY=0.9418 ssimUV=0.9176 psnrYUV=35.31 psnrRGB=32.03  encMs= 117.0
+libwebp        q=60  avgKB=  17.90  ssimY=0.9500 ssimUV=0.9229 psnrYUV=36.07 psnrRGB=32.65  encMs= 118.9
+libwebp        q=70  avgKB=  20.23  ssimY=0.9575 ssimUV=0.9279 psnrYUV=36.86 psnrRGB=33.27  encMs= 113.6
+libwebp        q=75  avgKB=  21.52  ssimY=0.9608 ssimUV=0.9304 psnrYUV=37.29 psnrRGB=33.60  encMs= 130.2
+libwebp        q=80  avgKB=  26.22  ssimY=0.9705 ssimUV=0.9383 psnrYUV=38.67 psnrRGB=34.64  encMs= 127.2
+libwebp        q=85  avgKB=  32.42  ssimY=0.9789 ssimUV=0.9459 psnrYUV=40.17 psnrRGB=35.71  encMs= 131.3
+libwebp        q=90  avgKB=  42.35  ssimY=0.9868 ssimUV=0.9541 psnrYUV=42.12 psnrRGB=37.01  encMs= 123.2
+libwebp        q=95  avgKB=  59.61  ssimY=0.9931 ssimUV=0.9616 psnrYUV=44.45 psnrRGB=38.39  encMs= 119.7
+deepteams      q=40  avgKB=  12.64  ssimY=0.9010 ssimUV=0.9110 psnrYUV=33.13 psnrRGB=30.34  encMs=  53.3
+deepteams      q=50  avgKB=  14.48  ssimY=0.9185 ssimUV=0.9176 psnrYUV=34.19 psnrRGB=31.23  encMs=  62.1
+deepteams      q=60  avgKB=  16.58  ssimY=0.9313 ssimUV=0.9235 psnrYUV=35.06 psnrRGB=31.96  encMs=  62.7
+deepteams      q=70  avgKB=  18.90  ssimY=0.9422 ssimUV=0.9291 psnrYUV=35.92 psnrRGB=32.68  encMs=  64.7
+deepteams      q=75  avgKB=  20.21  ssimY=0.9473 ssimUV=0.9320 psnrYUV=36.39 psnrRGB=33.05  encMs=  63.2
+deepteams      q=80  avgKB=  24.98  ssimY=0.9606 ssimUV=0.9402 psnrYUV=37.88 psnrRGB=34.20  encMs=  64.4
+deepteams      q=85  avgKB=  31.23  ssimY=0.9722 ssimUV=0.9479 psnrYUV=39.49 psnrRGB=35.39  encMs=  69.3
+deepteams      q=90  avgKB=  41.15  ssimY=0.9824 ssimUV=0.9560 psnrYUV=41.52 psnrRGB=36.79  encMs=  81.9
+deepteams      q=95  avgKB=  58.34  ssimY=0.9909 ssimUV=0.9628 psnrYUV=43.96 psnrRGB=38.26  encMs=  93.8
+deepteams-zero q=40  avgKB=  13.52  ssimY=0.9011 ssimUV=0.9140 psnrYUV=33.84 psnrRGB=30.86  encMs=  47.1
+deepteams-zero q=50  avgKB=  15.23  ssimY=0.9168 ssimUV=0.9199 psnrYUV=34.80 psnrRGB=31.68  encMs=  67.1
+deepteams-zero q=60  avgKB=  17.20  ssimY=0.9281 ssimUV=0.9248 psnrYUV=35.58 psnrRGB=32.31  encMs=  68.9
+deepteams-zero q=70  avgKB=  19.67  ssimY=0.9403 ssimUV=0.9312 psnrYUV=36.51 psnrRGB=33.11  encMs=  62.1
+deepteams-zero q=75  avgKB=  20.72  ssimY=0.9436 ssimUV=0.9332 psnrYUV=36.85 psnrRGB=33.38  encMs=  63.1
+deepteams-zero q=80  avgKB=  25.91  ssimY=0.9588 ssimUV=0.9412 psnrYUV=38.40 psnrRGB=34.52  encMs=  63.0
+deepteams-zero q=85  avgKB=  31.21  ssimY=0.9688 ssimUV=0.9481 psnrYUV=39.74 psnrRGB=35.53  encMs=  72.9
+deepteams-zero q=90  avgKB=  39.51  ssimY=0.9797 ssimUV=0.9528 psnrYUV=41.50 psnrRGB=36.62  encMs=  74.0
+deepteams-zero q=95  avgKB=  55.20  ssimY=0.9903 ssimUV=0.9601 psnrYUV=43.94 psnrRGB=38.07  encMs=  87.2
+webpi          q=40  avgKB=  13.40  ssimY=0.9294 ssimUV=0.9155 psnrYUV=34.31 psnrRGB=31.25  encMs=  64.8
+webpi          q=50  avgKB=  15.47  ssimY=0.9402 ssimUV=0.9211 psnrYUV=35.19 psnrRGB=31.98  encMs=  71.8
+webpi          q=60  avgKB=  17.58  ssimY=0.9489 ssimUV=0.9264 psnrYUV=35.97 psnrRGB=32.64  encMs=  64.7
+webpi          q=70  avgKB=  20.01  ssimY=0.9564 ssimUV=0.9317 psnrYUV=36.78 psnrRGB=33.30  encMs=  64.0
+webpi          q=75  avgKB=  21.34  ssimY=0.9598 ssimUV=0.9343 psnrYUV=37.20 psnrRGB=33.64  encMs=  62.0
+webpi          q=80  avgKB=  26.29  ssimY=0.9698 ssimUV=0.9423 psnrYUV=38.61 psnrRGB=34.73  encMs=  67.5
+webpi          q=85  avgKB=  33.22  ssimY=0.9786 ssimUV=0.9504 psnrYUV=40.17 psnrRGB=35.88  encMs=  78.3
+webpi          q=90  avgKB=  44.46  ssimY=0.9865 ssimUV=0.9586 psnrYUV=42.14 psnrRGB=37.24  encMs=  77.1
+webpi          q=95  avgKB=  62.19  ssimY=0.9929 ssimUV=0.9637 psnrYUV=44.40 psnrRGB=38.50  encMs=  86.8
 
 == 지표별 기준값에서의 크기 (vs libwebp) ==
 codec             ssim-y   ssim-uv  psnr-yuv  psnr-rgb
 libwebp            +0.0%     +0.0%     +0.0%     +0.0%
 deepteams         +14.1%     -8.9%     +6.5%     +3.8%
 deepteams-zero    +22.3%     -8.6%     +2.7%     +0.8%
-webpi              +2.2%     -9.7%     +0.8%     -1.5%
+webpi              +2.4%     -9.8%     +1.0%     -1.4%
 
 == BD-rate (겹치는 구간 평균, vs libwebp) ==
 libwebp            +0.0%     +0.0%     +0.0%     +0.0%
 deepteams         +16.6%     -9.1%     +6.5%     +3.4%
 deepteams-zero    +23.5%     -7.6%     +2.3%     +1.3%
-webpi              +1.8%    -10.4%     +1.9%     -1.1%
+webpi              +1.9%    -10.6%     +2.1%     -0.9%

@@ -86,7 +86,7 @@ func newModeContext(mbw int) *modeContext {
 }
 
 // update는 매크로블록의 4×4 모드(i16이면 그 모드로 채운 값)로 문맥을 넘긴다.
-func (c *modeContext) update(mb *mbInfo, mbx int) {
+func (c *modeContext) update(mb *mbHeader, mbx int) {
 	for i := range 4 {
 		c.top[mbx*4+i], c.left[i] = mb.bModes[12+i], mb.bModes[i*4+3]
 	}
@@ -115,7 +115,7 @@ func (e *encoder) writeModes(h *boolEncoder) {
 	}
 }
 
-func writeBModes(h *boolEncoder, mb *mbInfo, ctx *modeContext, mbx int) {
+func writeBModes(h *boolEncoder, mb *mbHeader, ctx *modeContext, mbx int) {
 	for b := range nYBlocks {
 		above, left := ctx.neighbors(mb, mbx, b)
 		for _, s := range bmodePath[mb.bModes[b]] {
@@ -125,7 +125,7 @@ func writeBModes(h *boolEncoder, mb *mbInfo, ctx *modeContext, mbx int) {
 }
 
 // neighbors는 매크로블록 안 블록 b의 위·왼쪽 4×4 모드다 (mb.bModes의 앞선 블록은 이미 정해져 있어야 한다).
-func (c *modeContext) neighbors(mb *mbInfo, mbx, b int) (above, left uint8) {
+func (c *modeContext) neighbors(mb *mbHeader, mbx, b int) (above, left uint8) {
 	bx, by := b%4, b/4
 	above, left = c.top[mbx*4+bx], c.left[by]
 	if by > 0 {

@@ -33,7 +33,8 @@ type encoder struct {
 	// 인코딩 중 비용 계산에 쓰는 위쪽 문맥 (디코더가 보는 것과 같다). 왼쪽 문맥은 rowCoder가 가진다.
 	nzTop    []nzContext
 	modeTop  []uint8
-	mbs      []mbInfo
+	mbs      []mbHeader
+	coefs    [][]int16 // 행별 압축 계수 — 건너뛰지 않는 매크로블록만, 래스터 순서
 	probs    probTable
 	costs    *levelCosts // probs에 맞춘 RD 비용 표
 	useSkip  bool
@@ -69,7 +70,7 @@ func encodeFrame(m image.Image, quality float32) (*encoder, []byte, error) {
 	}
 	e.costs = defaultLevelCosts()
 	e.nzTop, e.modeTop = make([]nzContext, src.mbw), make([]uint8, src.mbw*4)
-	e.mbs = make([]mbInfo, src.mbw*src.mbh)
+	e.mbs, e.coefs = make([]mbHeader, src.mbw*src.mbh), make([][]int16, src.mbh)
 	stats := e.encodeRows()
 	vp8, err := e.bitstream(stats)
 	return e, vp8, err
@@ -77,6 +78,10 @@ func encodeFrame(m image.Image, quality float32) (*encoder, []byte, error) {
 
 // 행 r의 매크로블록 x는 윗행이 x+1까지 끝나야 시작할 수 있다 — i4의 오른쪽 위 픽셀이 윗행 x+1에 있다.
 const wavefrontLag = 2
+
+// 행 계수 버퍼의 처음 크기(매크로블록당, 최대 25·17=425). COCO 8장의 평균은 q75 131, q90 217이고
+// 가장 큰 행의 평균은 q75 282, q95 373이라 대부분의 행이 한 번도 늘지 않는다
+const coefsPerMBHint = 256
 
 // encodeRows는 매크로블록 행들을 대각선 물결(wavefront)로 동시에 인코딩하고 프레임의 토큰 통계를 돌려준다.
 // 각 매크로블록은 왼쪽·위·오른쪽 위 이웃만 보므로, 윗행이 두 칸 앞서 있으면 결과가 순차 인코딩과 같다.
@@ -87,12 +92,13 @@ func (e *encoder) encodeRows() *tokenStats {
 	for y := range done {
 		done[y] = make(chan struct{}, mbw)
 	}
-	rowStats := make([]tokenStats, mbh)
+	// 통계는 더하기라 작업자별로 모아 합쳐도 행 순서와 무관하게 같다
+	stats := make([]tokenStats, rowWorkers(mbh))
 	// 행을 위에서부터 차례로 집어 가므로 기다리는 윗행은 항상 이미 누군가 맡고 있다
-	parallelRows(mbh, func(y int) { e.encodeRow(y, done, &rowStats[y]) })
-	total := &rowStats[0]
-	for y := 1; y < mbh; y++ {
-		addStats(total, &rowStats[y])
+	parallelRows(mbh, func(w, y int) { e.encodeRow(y, done, &stats[w]) })
+	total := &stats[0]
+	for w := 1; w < len(stats); w++ {
+		addStats(total, &stats[w])
 	}
 	return total
 }
@@ -112,7 +118,8 @@ func addStats(dst, src *tokenStats) {
 
 func (e *encoder) encodeRow(y int, done []chan struct{}, stats *tokenStats) {
 	mbw := e.src.mbw
-	r := &rowCoder{encoder: e, modes: modeContext{top: e.modeTop}, stats: stats}
+	e.coefs[y] = make([]int16, 0, mbw*coefsPerMBHint)
+	r := &rowCoder{encoder: e, modes: modeContext{top: e.modeTop}, stats: stats, coefs: &e.coefs[y]}
 	above := 0 // 윗행에서 끝났다고 확인한 매크로블록 수
 	for x := range mbw {
 		for y > 0 && above < min(x+wavefrontLag, mbw) {
