@@ -22,12 +22,28 @@ type quantMatrix struct {
 	bias  [2]int32
 	iq    [2]uint32
 	rbias [2]uint32
+	vec   quantVecs
+}
+
+// quantVecs는 SIMD 커널이 읽는 양자화 값과 변환 상수다. 계수 위치(자연 순서)마다 펼쳐 둔다.
+// k의 순서는 internal/asmgen/gen.py의 상수 벡터 정의와 같아야 한다.
+type quantVecs struct {
+	k  [12]int32
+	iq [16]uint32
+	rb [16]uint32
+	q  [16]int32
 }
 
 func (m *quantMatrix) setReciprocals() {
 	for k := range m.q {
 		m.iq[k] = (1 << quantFix) / uint32(m.q[k])
 		m.rbias[k] = uint32(m.bias[k]) << (quantFix - 8)
+	}
+	m.vec.k = [12]int32{fdctK1, fdctK2, fdctRound1, fdctRound3, fdctRound4, fdctRound12, fdctRound0, maxLevel,
+		idctC2, idctC1, idctRound, 0}
+	for pos := range 16 {
+		k := b2i(pos > 0)
+		m.vec.iq[pos], m.vec.rb[pos], m.vec.q[pos] = m.iq[k], m.rbias[k], m.q[k]
 	}
 }
 

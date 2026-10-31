@@ -6,6 +6,12 @@ const (
 	idctC2 = 35468 // 65536 × sin(π/8) × √2
 	fdctK1 = 2217
 	fdctK2 = 5352
+	// 순 DCT 반올림 상수 — 행 단계 출력 1·3, 열 단계 출력 0(·2)·4·12
+	fdctRound1  = 1812
+	fdctRound3  = 937
+	fdctRound0  = 7
+	fdctRound4  = 12000
+	fdctRound12 = 51000
 )
 
 // fdct4는 4×4 잔차(src-pred)를 DCT 계수로 바꾼다. 결과는 행 우선 자연 순서.
@@ -15,17 +21,17 @@ func fdct4(res *[16]int32) [16]int32 {
 		d0, d1, d2, d3 := res[i*4], res[i*4+1], res[i*4+2], res[i*4+3]
 		a0, a1, a2, a3 := d0+d3, d1+d2, d1-d2, d0-d3
 		tmp[i*4+0] = (a0 + a1) * 8
-		tmp[i*4+1] = (a2*fdctK1 + a3*fdctK2 + 1812) >> 9
+		tmp[i*4+1] = (a2*fdctK1 + a3*fdctK2 + fdctRound1) >> 9
 		tmp[i*4+2] = (a0 - a1) * 8
-		tmp[i*4+3] = (a3*fdctK1 - a2*fdctK2 + 937) >> 9
+		tmp[i*4+3] = (a3*fdctK1 - a2*fdctK2 + fdctRound3) >> 9
 	}
 	for i := range 4 {
 		a0, a1 := tmp[i]+tmp[12+i], tmp[4+i]+tmp[8+i]
 		a2, a3 := tmp[4+i]-tmp[8+i], tmp[i]-tmp[12+i]
-		out[i] = (a0 + a1 + 7) >> 4
-		out[4+i] = (a2*fdctK1+a3*fdctK2+12000)>>16 + b2i(a3 != 0)
-		out[8+i] = (a0 - a1 + 7) >> 4
-		out[12+i] = (a3*fdctK1 - a2*fdctK2 + 51000) >> 16
+		out[i] = (a0 + a1 + fdctRound0) >> 4
+		out[4+i] = (a2*fdctK1+a3*fdctK2+fdctRound4)>>16 + b2i(a3 != 0)
+		out[8+i] = (a0 - a1 + fdctRound0) >> 4
+		out[12+i] = (a3*fdctK1 - a2*fdctK2 + fdctRound12) >> 16
 	}
 	return out
 }

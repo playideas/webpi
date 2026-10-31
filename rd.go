@@ -119,8 +119,8 @@ func ttransform(in []uint8, s int) int32 {
 	return sum
 }
 
-// satd4는 원본과 예측의 4×4 잔차를 하다마드 변환한 계수의 절대합이다.
-func satd4(src []uint8, s, x, y int, pred *[16]uint8) int64 {
+// satd4Go는 원본과 예측의 4×4 잔차를 하다마드 변환한 계수의 절대합이다.
+func satd4Go(src []uint8, s, x, y int, pred *[16]uint8) int64 {
 	var tmp [16]int32
 	for j := range 4 {
 		row := src[(y+j)*s+x : (y+j)*s+x+4]

@@ -276,8 +276,7 @@ func (e *rowCoder) tryBlock4(q *quantizer, lam *rdLambdas, pred *[16]uint8, m, s
 	if c.score.setScore(lam.i4); c.score.score >= limit {
 		return c
 	}
-	c.levels, c.rec = quantBlock(&q.y1, e.src.y, e.src.ys, sx, sy, pred)
-	c.score.d = regionSSE(e.src.y, e.src.ys, sx, sy, c.rec[:], 4)
+	c.score.d = quantBlock(&q.y1, e.src.y, e.src.ys, sx, sy, pred, &c.levels, &c.rec)
 	if c.score.setScore(lam.i4); c.score.score >= limit {
 		return c
 	}
@@ -334,14 +333,15 @@ func (e *rowCoder) pickUV(mb *mbInfo, q *quantizer, lam *rdLambdas, mbx, mby int
 
 // quantChroma는 한 색차 평면의 8×8 잔차를 4개 블록으로 양자화해 rec(8×8)에 복원하고 SSE를 돌려준다.
 func (e *rowCoder) quantChroma(mb *mbInfo, q *quantizer, src, pred []uint8, base, cx, cy int, rec []uint8) int64 {
+	var sse int64
 	for b := range 4 {
 		bx, by := (b%2)*4, (b/2)*4
 		p := sub4(pred, uvSize, bx, by)
 		var px [16]uint8
-		mb.levels[base+b], px = quantBlock(&q.uv, src, e.src.cs, cx+bx, cy+by, &p)
+		sse += quantBlock(&q.uv, src, e.src.cs, cx+bx, cy+by, &p, &mb.levels[base+b], &px)
 		copyBlock(rec, uvSize, bx, by, px[:], 4)
 	}
-	return regionSSE(src, e.src.cs, cx, cy, rec, uvSize)
+	return sse
 }
 
 func (e *rowCoder) chromaRate(mb *mbInfo, mbx int) int64 {
@@ -351,13 +351,14 @@ func (e *rowCoder) chromaRate(mb *mbInfo, mbx int) int64 {
 	return r
 }
 
-// quantBlock은 4×4 블록 하나를 변환·양자화(DC 포함)하고 레벨과 복원 픽셀을 돌려준다.
-func quantBlock(m *quantMatrix, src []uint8, s, x, y int, pred *[16]uint8) ([16]int16, [16]uint8) {
+// quantBlockGo는 4×4 블록 하나를 변환·양자화(DC 포함)해 levels·rec에 쓰고 원본과 복원의 SSE를 돌려준다.
+// SIMD 커널(quantBlock)과 결과가 비트 단위로 같아야 한다.
+func quantBlockGo(m *quantMatrix, src []uint8, s, x, y int, pred *[16]uint8, levels *[16]int16, rec *[16]uint8) int64 {
 	res := residual4(src, s, x, y, pred)
 	coeffs := fdct4(&res)
-	var levels [16]int16
-	deq := m.quantize(&coeffs, &levels, 0)
-	return levels, idct4Add(&deq, pred)
+	deq := m.quantize(&coeffs, levels, 0)
+	*rec = idct4Add(&deq, pred)
+	return regionSSE(src, s, x, y, rec[:], 4)
 }
 
 func residual4(src []uint8, s, x, y int, pred *[16]uint8) [16]int32 {
