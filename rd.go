@@ -20,11 +20,13 @@ const (
 	expnShift = 4
 )
 
-// λ 계수: λ_i4 = 3q²>>7, λ_i16 = 3q², λ_uv = 3q²>>6, λ_mode = q²>>7
+// λ 계수: λ_i4 = 3q²>>7, λ_i16 = 3q², λ_uv = 3q²>>8, λ_mode = q²>>7
+// λ_uv는 libwebp(>>6)보다 4배 작다 — 색차 모드를 비트보다 왜곡 위주로 고르게 해서 색 번짐을 줄인다.
+// 색차 AC 편향(uvACBias)과 함께 잰 결과 >>8이 색차 지표를 가장 많이 얻고 휘도 손실은 거의 없었다 (>>5~>>10 비교).
 const (
 	lambdaScale     = 3
 	lambdaI4Shift   = 7
-	lambdaUVShift   = 6
+	lambdaUVShift   = 8
 	lambdaModeShift = 7
 )
 
@@ -99,11 +101,6 @@ func isFlat(levels [][16]int32, limit int) bool {
 // tdistoWeight는 저주파를 더 무겁게 보는 하다마드 계수 가중치다 (libwebp kWeightY).
 var tdistoWeight = [16]int32{38, 32, 20, 9, 32, 28, 17, 7, 20, 17, 10, 4, 9, 7, 4, 2}
 
-// tdisto4는 두 4×4 블록(stride sa, sb)의 가중 하다마드 에너지 차이 — 텍스처가 사라지면 커진다.
-func tdisto4(a []uint8, sa int, b []uint8, sb int) int64 {
-	return int64(abs(int(ttransform(a, sa)-ttransform(b, sb)))) >> tdistoShift
-}
-
 func ttransform(in []uint8, s int) int32 {
 	var tmp [16]int32
 	for i := range 4 {
@@ -123,21 +120,33 @@ func ttransform(in []uint8, s int) int32 {
 }
 
 // regionDisto는 원본 평면 영역과 n×n 복원 블록의 SSE와 (tλ>0이면) 텍스처 왜곡을 구한다.
-func regionDisto(src []uint8, s, x0, y0 int, rec []uint8, n int, tlambda int64) (d, sd int64) {
+func regionDisto(src []uint8, s, x0, y0 int, rec []uint8, n int, tlambda int64, srcT []int32) (d, sd int64) {
+	return regionSSE(src, s, x0, y0, rec, n), regionTDisto(rec, n, tlambda, srcT)
+}
+
+func regionSSE(src []uint8, s, x0, y0 int, rec []uint8, n int) int64 {
+	var d int64
 	for j := range n {
-		for i := range n {
-			v := int64(src[(y0+j)*s+x0+i]) - int64(rec[j*n+i])
-			d += v * v
+		row := src[(y0+j)*s+x0 : (y0+j)*s+x0+n]
+		for i, v := range row {
+			e := int64(v) - int64(rec[j*n+i])
+			d += e * e
 		}
 	}
+	return d
+}
+
+// regionTDisto는 4×4 블록마다 가중 하다마드 에너지의 차이를 tλ로 잰다 — 텍스처가 사라지면 커진다.
+// srcT는 원본 4×4 블록들의 ttransform 값으로, 매크로블록 안 래스터 순서(행 폭 4)로 놓인다.
+func regionTDisto(rec []uint8, n int, tlambda int64, srcT []int32) int64 {
 	if tlambda == 0 {
-		return d, 0
+		return 0
 	}
 	var td int64
 	for by := 0; by < n; by += 4 {
 		for bx := 0; bx < n; bx += 4 {
-			td += tdisto4(src[(y0+by)*s+x0+bx:], s, rec[by*n+bx:], n)
+			td += int64(abs32(srcT[by+bx/4]-ttransform(rec[by*n+bx:], n))) >> tdistoShift
 		}
 	}
-	return d, (tlambda*td + 1<<(mult8BShift-1)) >> mult8BShift
+	return (tlambda*td + 1<<(mult8BShift-1)) >> mult8BShift
 }

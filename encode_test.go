@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -118,7 +119,7 @@ func Test_Encode_zeroSizeImage_returnsError(t *testing.T) {
 
 // 루프 필터가 꺼져 있으면 디코더 출력 YUV가 인코더의 복원 평면과 비트 단위로 같아야 한다.
 // 다르면 예측·변환·토큰 중 어딘가가 디코더와 어긋난 것이다.
-func Test_encodeFrame_noLoopFilter_dwebpYUVMatchesReconstructionExactly(t *testing.T) {
+func Test_encodeFrame_dwebpUnfilteredYUV_matchesReconstructionExactly(t *testing.T) {
 	if _, err := exec.LookPath("dwebp"); err != nil {
 		t.Skip("dwebp 없음")
 	}
@@ -147,7 +148,7 @@ func dwebpYUV(t *testing.T, webp []byte) []byte {
 	if err := os.WriteFile(in, webp, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if msg, err := exec.Command("dwebp", "-yuv", in, "-o", out).CombinedOutput(); err != nil {
+	if msg, err := exec.Command("dwebp", "-nofilter", "-yuv", in, "-o", out).CombinedOutput(); err != nil {
 		t.Fatalf("dwebp 실패: %v\n%s", err, msg)
 	}
 	b, err := os.ReadFile(out)
@@ -179,4 +180,49 @@ func firstDiff(a, b []byte) int {
 		}
 	}
 	return min(len(a), len(b))
+}
+
+func Test_levelCosts_residual_matchesTokenWriterRate(t *testing.T) {
+	costs := newLevelCosts(&defaultTokenProb)
+	cases := [][16]int32{
+		{},
+		{1},
+		{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, -3},
+		{5, -1, 0, 2, 0, 0, 7, 0, 0, 0, 12, 0, 0, 30, 0, 0},
+		{100, -67, 68, 2047, -500, 1, 0, 0, 4, 0, 0, 0, 0, 0, 0, 1},
+	}
+	for i, lv := range cases {
+		for plane := range nPlane {
+			for ctx := range nContext {
+				for _, first := range []int{0, 1} {
+					var want int64
+					w := tokenWriter{probs: &defaultTokenProb, rate: &want}
+					wantNZ := w.block(&lv, plane, ctx, first)
+					got, nz := costs.residual(&lv, plane, ctx, first)
+					if got != want || nz != wantNZ {
+						t.Fatalf("case %d plane %d ctx %d first %d: got (%d,%d), want (%d,%d)", i, plane, ctx, first, got, nz, want, wantNZ)
+					}
+				}
+			}
+		}
+	}
+}
+
+func Test_Encode_parallelRows_matchesSingleThreadBytes(t *testing.T) {
+	src := syntheticImage(260, 150) // 17×10 매크로블록 — 행보다 작업자가 적고 많은 경우를 모두 지난다
+	encode := func(procs int) []byte {
+		prev := runtime.GOMAXPROCS(procs)
+		defer runtime.GOMAXPROCS(prev)
+		var buf bytes.Buffer
+		if err := Encode(&buf, src, &Options{Quality: 60}); err != nil {
+			t.Fatal(err)
+		}
+		return buf.Bytes()
+	}
+	want := encode(1)
+	for _, procs := range []int{2, 3, 8} {
+		if got := encode(procs); !bytes.Equal(got, want) {
+			t.Fatalf("GOMAXPROCS=%d: 순차 인코딩과 다름 (%d vs %d바이트)", procs, len(got), len(want))
+		}
+	}
 }

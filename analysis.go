@@ -55,16 +55,21 @@ func (h *histogram) alpha() int {
 }
 
 // mbAlphas는 원본 평면만으로 매크로블록별 최종 민감도(클수록 평탄)와 색차 민감도 평균을 구한다.
+// 매크로블록끼리 독립이라 행 단위로 나눠 동시에 계산한다.
 func mbAlphas(src *yuvPlanes) (alphas []int, uvAlphaAvg int) {
-	alphas = make([]int, 0, src.mbw*src.mbh)
-	uvSum := 0
-	for mby := range src.mbh {
+	alphas = make([]int, src.mbw*src.mbh)
+	uvRows := make([]int, src.mbh)
+	parallelRows(src.mbh, func(mby int) {
 		for mbx := range src.mbw {
 			ya, uva := mbRawAlphas(src, mbx, mby)
 			a := (lumaAlphaWeight*ya + uva + 1<<(alphaMixShift-1)) >> alphaMixShift
-			alphas = append(alphas, min(max(maxAlpha-a, 0), maxAlpha))
-			uvSum += uva
+			alphas[mby*src.mbw+mbx] = min(max(maxAlpha-a, 0), maxAlpha)
+			uvRows[mby] += uva
 		}
+	})
+	uvSum := 0
+	for _, v := range uvRows {
+		uvSum += v
 	}
 	return alphas, uvSum / len(alphas)
 }
@@ -77,19 +82,20 @@ func mbRawAlphas(src *yuvPlanes, mbx, mby int) (yAlpha, uvAlpha int) {
 	ue := loadEdges(src.u, src.cs, cx, cy, uvSize)
 	ve := loadEdges(src.v, src.cs, cx, cy, uvSize)
 	yAlpha, uvAlpha = -1, -1
+	var buf predBuf
 	for m := range nAnalysisModes {
 		var hy, huv histogram
-		hy.add(src.y, src.ys, x0, y0, predict(m, &ye, mbSize), mbSize)
-		huv.add(src.u, src.cs, cx, cy, predict(m, &ue, uvSize), uvSize)
-		huv.add(src.v, src.cs, cx, cy, predict(m, &ve, uvSize), uvSize)
+		hy.add(src.y, src.ys, x0, y0, predict(m, &ye, mbSize, &buf), mbSize)
+		huv.add(src.u, src.cs, cx, cy, predict(m, &ue, uvSize, &buf), uvSize)
+		huv.add(src.v, src.cs, cx, cy, predict(m, &ve, uvSize, &buf), uvSize)
 		yAlpha, uvAlpha = max(yAlpha, hy.alpha()), max(uvAlpha, huv.alpha())
 	}
 	return yAlpha, uvAlpha
 }
 
-// assignSegments는 민감도를 k-means로 4개 무리로 나눠 매크로블록별 세그먼트와
-// 세그먼트별 정규화 민감도(-127~127, 0이 전체 가중 평균)를 돌려준다.
-func assignSegments(alphas []int) (segs []uint8, segAlpha [nSegments]int) {
+// assignSegments는 민감도를 k-means로 4개 무리로 나눠 매크로블록별 세그먼트,
+// 세그먼트별 정규화 민감도(-127~127, 0이 전체 가중 평균)와 복잡도 순위(0~255, 0이 가장 복잡)를 돌려준다.
+func assignSegments(alphas []int) (segs []uint8, segAlpha, segBeta [nSegments]int) {
 	var counts [maxAlpha + 1]int
 	for _, a := range alphas {
 		counts[a]++
@@ -108,8 +114,9 @@ func assignSegments(alphas []int) (segs []uint8, segAlpha [nSegments]int) {
 	}
 	for n, c := range centers {
 		segAlpha[n] = min(max(maxAlpha*(c-mid)/(hi-lo), -maxSegAlpha), maxSegAlpha)
+		segBeta[n] = min(max(maxAlpha*(c-lo)/(hi-lo), 0), maxAlpha)
 	}
-	return segs, segAlpha
+	return segs, segAlpha, segBeta
 }
 
 const maxSegAlpha = 127

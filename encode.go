@@ -30,12 +30,12 @@ type encoder struct {
 	src, rec *yuvPlanes
 	seg      segmentation
 	lambdas  [nSegments]rdLambdas
-	// 인코딩 중 비용 계산에 쓰는 문맥 (디코더가 보는 것과 같다)
+	// 인코딩 중 비용 계산에 쓰는 위쪽 문맥 (디코더가 보는 것과 같다). 왼쪽 문맥은 rowCoder가 가진다.
 	nzTop    []nzContext
-	nzLeft   nzContext
-	modes    *modeContext
+	modeTop  []uint8
 	mbs      []mbInfo
 	probs    probTable
+	costs    *levelCosts // probs에 맞춘 RD 비용 표
 	useSkip  bool
 	skipProb uint8
 }
@@ -67,15 +67,42 @@ func encodeFrame(m image.Image, quality float32) (*encoder, []byte, error) {
 	for n := range nSegments {
 		e.lambdas[n] = newRDLambdas(&e.seg.quant[n])
 	}
-	e.nzTop, e.modes = make([]nzContext, src.mbw), newModeContext(src.mbw)
-	for mby := range e.src.mbh {
-		e.nzLeft, e.modes.left = nzContext{}, [4]uint8{}
-		for mbx := range e.src.mbw {
-			e.mbs = append(e.mbs, e.encodeMB(mbx, mby))
-		}
-	}
+	e.costs = newLevelCosts(&e.probs)
+	e.nzTop, e.modeTop = make([]nzContext, src.mbw), make([]uint8, src.mbw*4)
+	e.mbs = make([]mbInfo, src.mbw*src.mbh)
+	e.encodeRows()
 	vp8, err := e.bitstream()
 	return e, vp8, err
+}
+
+// 행 r의 매크로블록 x는 윗행이 x+1까지 끝나야 시작할 수 있다 — i4의 오른쪽 위 픽셀이 윗행 x+1에 있다.
+const wavefrontLag = 2
+
+// encodeRows는 매크로블록 행들을 대각선 물결(wavefront)로 동시에 인코딩한다.
+// 각 매크로블록은 왼쪽·위·오른쪽 위 이웃만 보므로, 윗행이 두 칸 앞서 있으면 결과가 순차 인코딩과 같다.
+// 행마다 끝낸 매크로블록 수를 채널 토큰으로 아랫행에 알린다 — 채널이 메모리 순서도 보장한다.
+func (e *encoder) encodeRows() {
+	mbw, mbh := e.src.mbw, e.src.mbh
+	done := make([]chan struct{}, mbh)
+	for y := range done {
+		done[y] = make(chan struct{}, mbw)
+	}
+	// 행을 위에서부터 차례로 집어 가므로 기다리는 윗행은 항상 이미 누군가 맡고 있다
+	parallelRows(mbh, func(y int) { e.encodeRow(y, done) })
+}
+
+func (e *encoder) encodeRow(y int, done []chan struct{}) {
+	mbw := e.src.mbw
+	r := rowCoder{encoder: e, modes: modeContext{top: e.modeTop}}
+	above := 0 // 윗행에서 끝났다고 확인한 매크로블록 수
+	for x := range mbw {
+		for y > 0 && above < min(x+wavefrontLag, mbw) {
+			<-done[y-1]
+			above++
+		}
+		e.mbs[y*mbw+x] = r.encodeMB(x, y)
+		done[y] <- struct{}{}
+	}
 }
 
 // bitstream은 확률을 정한 뒤 첫 파티션(헤더·모드)과 토큰 파티션을 써서 VP8 프레임을 만든다.
@@ -123,8 +150,9 @@ func (e *encoder) writeHeader(h *boolEncoder, stats *tokenStats) {
 	h.putBit(uniformProb, false) // 색 공간
 	h.putBit(uniformProb, false) // 클램핑 필요
 	e.writeSegmentHeader(h)
-	h.putBit(uniformProb, false) // 일반 루프 필터
-	h.putUint(0, 6)              // 필터 레벨 — 골격 단계는 0
+	h.putBit(uniformProb, false) // 일반(강한) 루프 필터
+	// 세그먼트가 절대값으로 덮어쓰므로 프레임 레벨은 형식상 값이다
+	h.putUint(uint32(e.seg.filter[0]), filterLevelBits)
 	h.putUint(0, 3)              // 선명도
 	h.putBit(uniformProb, false) // 모드/참조별 필터 델타 없음
 	h.putUint(0, 2)              // 토큰 파티션 1개
@@ -152,8 +180,8 @@ func (e *encoder) writeSegmentHeader(h *boolEncoder) {
 	for n := range nSegments {
 		h.putSignedOptional(e.seg.quant[n].qi, qIndexBits)
 	}
-	for range nSegments {
-		h.putSignedOptional(0, filterLevelBits) // 세그먼트별 필터 레벨 없음
+	for _, f := range e.seg.filter {
+		h.putSignedOptional(f, filterLevelBits)
 	}
 	for _, p := range e.seg.probs {
 		// 255는 갱신 생략으로 표현한다

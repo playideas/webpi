@@ -46,9 +46,12 @@ func loadEdges(pl []uint8, s, x0, y0, n int) edges {
 	return e
 }
 
-// predict는 모드 mode로 n×n 예측 블록(행 우선)을 만든다.
-func predict(mode int, e *edges, n int) []uint8 {
-	out := make([]uint8, n*n)
+// predBuf는 가장 큰(16×16) 예측 블록을 담는 호출자 쪽 버퍼다 — 힙 할당을 피한다.
+type predBuf [mbSize * mbSize]uint8
+
+// predict는 모드 mode로 n×n 예측 블록(행 우선)을 buf에 만들어 그 앞부분을 돌려준다.
+func predict(mode int, e *edges, n int, buf *predBuf) []uint8 {
+	out := buf[:n*n]
 	for j := range n {
 		for i := range n {
 			var v uint8

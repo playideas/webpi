@@ -31,7 +31,16 @@ func fdct4(res *[16]int32) [16]int32 {
 }
 
 // idct4Add는 디코더와 같은 정수 역 DCT로 잔차를 복원해 pred에 더한다 (0~255로 자른다).
+// 낮은 화질에서는 DC만 남은 블록이 대부분이라 그 경우를 따로 푼다 — 역 DCT 결과가 (DC+4)>>3으로 균일하다.
 func idct4Add(c *[16]int32, pred *[16]uint8) [16]uint8 {
+	if acZero(c) {
+		var out [16]uint8
+		r := (c[0] + idctRound) >> idctShift
+		for i, p := range pred {
+			out[i] = clip8(int32(p) + r)
+		}
+		return out
+	}
 	var m [4][4]int32
 	for i := range 4 {
 		a := c[i] + c[8+i]
@@ -52,6 +61,20 @@ func idct4Add(c *[16]int32, pred *[16]uint8) [16]uint8 {
 		}
 	}
 	return out
+}
+
+const (
+	idctRound = 4
+	idctShift = 3
+)
+
+func acZero(c *[16]int32) bool {
+	for _, v := range c[1:] {
+		if v != 0 {
+			return false
+		}
+	}
+	return true
 }
 
 // fwht는 16개 블록의 DC(블록 래스터 순서)를 Y2 계수로 바꾼다.

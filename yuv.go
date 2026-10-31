@@ -3,6 +3,7 @@ package webpi
 import (
 	"image"
 	"image/color"
+	"math"
 )
 
 // BT.601 limited range 변환 계수 (× 2^16) — 디코더(dwebp)의 역변환과 짝
@@ -37,24 +38,58 @@ func toYUV420(m image.Image) *yuvPlanes {
 	p.u = make([]uint8, p.cs*p.mbh*8)
 	p.v = make([]uint8, p.cs*p.mbh*8)
 	rgb := rgbReader(m)
-	for y := range p.mbh * 16 {
+	parallelRows(p.mbh*16, func(y int) {
 		for x := range p.mbw * 16 {
 			r, g, bl := rgb(min(x, p.w-1), min(y, p.h-1))
 			p.y[y*p.ys+x] = uint8((yR*r + yG*g + yB*bl + yuvHalf + yOffset) >> yuvFix)
 		}
-	}
-	for y := range p.mbh * 8 {
+	})
+	parallelRows(p.mbh*8, func(y int) {
 		for x := range p.mbw * 8 {
 			var sr, sg, sb int
 			for _, d := range [4][2]int{{0, 0}, {1, 0}, {0, 1}, {1, 1}} {
 				r, g, bl := rgb(min(2*x+d[0], p.w-1), min(2*y+d[1], p.h-1))
-				sr, sg, sb = sr+r, sg+g, sb+bl
+				sr, sg, sb = sr+gammaToLinear[r], sg+gammaToLinear[g], sb+gammaToLinear[bl]
 			}
+			sr, sg, sb = linearToGamma(sr), linearToGamma(sg), linearToGamma(sb)
 			p.u[y*p.cs+x] = clipUV(uR*sr + uG*sg + uB*sb)
 			p.v[y*p.cs+x] = clipUV(vR*sr + vG*sg + vB*sb)
 		}
-	}
+	})
 	return p
+}
+
+// 색차 2×2 평균은 감마를 푼 선형 공간에서 낸다 — 밝기 경계에서 평균이 어두운 쪽으로 쏠려
+// 색이 번지는 것을 줄인다. 상수와 고정소수점 처리는 libwebp picture_csp_enc.c와 같다.
+const (
+	gammaExp    = 0.80
+	gammaFix    = 12 // 선형 값의 정밀도
+	gammaTabFix = 7  // 역변환 표 보간의 정밀도
+	gammaScale  = 1<<gammaFix - 1
+	gammaTabLen = 1 << (gammaFix - gammaTabFix)
+	// 네 값의 합(×4)을 받으므로 보간 분수부는 2비트 더 넓다
+	gammaFracBits = gammaTabFix + 2
+	gammaFracMask = 1<<gammaFracBits - 1
+)
+
+var gammaToLinear, linearToGammaTab = func() (g [256]int, l [gammaTabLen + 1]int) {
+	for v := range g {
+		g[v] = int(math.Pow(float64(v)/maxPixel, gammaExp)*gammaScale + 0.5)
+	}
+	scale := float64(1<<gammaTabFix) / gammaScale
+	for v := range l {
+		l[v] = int(maxPixel*math.Pow(scale*float64(v), 1/gammaExp) + 0.5)
+	}
+	return g, l
+}()
+
+const maxPixel = 255
+
+// linearToGamma는 선형 값 네 개의 합을 감마 공간 값 네 개의 합(×4) 척도로 되돌린다.
+func linearToGamma(sum int) int {
+	pos, frac := sum>>gammaFracBits, sum&gammaFracMask
+	y := linearToGammaTab[pos+1]*frac + linearToGammaTab[pos]*(gammaFracMask+1-frac)
+	return (y + 1<<(gammaTabFix-1)) >> gammaTabFix
 }
 
 func clipUV(v int) uint8 {
@@ -74,6 +109,13 @@ func rgbReader(m image.Image) func(x, y int) (int, int, int) {
 		return func(x, y int) (int, int, int) {
 			i := img.PixOffset(b.Min.X+x, b.Min.Y+y)
 			return int(img.Pix[i]), int(img.Pix[i+1]), int(img.Pix[i+2])
+		}
+	case *image.YCbCr:
+		// JPEG 디코더의 출력 — At은 픽셀마다 인터페이스 값을 할당하므로 피한다
+		return func(x, y int) (int, int, int) {
+			c := img.YCbCrAt(b.Min.X+x, b.Min.Y+y)
+			r, g, bl := color.YCbCrToRGB(c.Y, c.Cb, c.Cr)
+			return int(r), int(g), int(bl)
 		}
 	}
 	return func(x, y int) (int, int, int) {

@@ -77,12 +77,7 @@ func (e *encoder) writeProbUpdates(h *boolEncoder, stats *tokenStats) {
 			for k := range nContext {
 				for l := range nProb {
 					upd := tokenProbUpdateProb[i][j][k][l]
-					old := e.probs[i][j][k][l]
-					c := stats[i][j][k][l]
-					np := probFromCounts(c[0], c[1])
-					gain := treeCost(old, c) - treeCost(np, c) -
-						(bitCost(upd, true) + probValueBits - bitCost(upd, false))
-					doUpdate := c[0]+c[1] > 0 && np != old && gain > 0
+					np, doUpdate := probUpdate(upd, e.probs[i][j][k][l], stats[i][j][k][l])
 					h.putBit(upd, doUpdate)
 					if doUpdate {
 						h.putUint(uint32(np), probValueBits)
@@ -92,6 +87,13 @@ func (e *encoder) writeProbUpdates(h *boolEncoder, stats *tokenStats) {
 			}
 		}
 	}
+}
+
+// probUpdate는 횟수 c에 맞춘 새 확률과, 갱신 신호 비용을 치르고도 이득인지를 돌려준다.
+func probUpdate(upd, old uint8, c [2]uint32) (uint8, bool) {
+	np := probFromCounts(c[0], c[1])
+	gain := treeCost(old, c) - treeCost(np, c) - (bitCost(upd, true) + probValueBits - bitCost(upd, false))
+	return np, c[0]+c[1] > 0 && np != old && gain > 0
 }
 
 // probFromCounts는 0이 나온 비율로 확률(0일 확률 × 256)을 정한다.

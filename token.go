@@ -25,11 +25,13 @@ type tokenStats = [nPlane][nBand][nContext][nProb][2]uint32
 
 // tokenWriter는 계수 토큰을 쓴다. enc·stats·rate 중 nil이 아닌 것에만 반영한다
 // (비트 쓰기, 노드별 횟수, 비용 누적). 모두 nil이면 문맥 계산만 한다.
+// costs가 있으면 블록 비용을 트리를 따라가지 않고 그 표(와 표의 확률)에서 낸다 (rate 전용).
 type tokenWriter struct {
 	enc   *boolEncoder
 	probs *probTable
 	stats *tokenStats
 	rate  *int64
+	costs *levelCosts
 }
 
 func (w *tokenWriter) node(plane, band, ctx, i int, bit bool) {
@@ -56,6 +58,14 @@ func (w *tokenWriter) fixed(prob uint8, bit bool) {
 // block은 한 4×4 블록의 레벨(자연 순서)을 first번째 지그재그 계수부터 쓰고,
 // 0이 아닌 계수가 있었는지(다음 블록의 문맥)를 돌려준다.
 func (w *tokenWriter) block(levels *[16]int32, plane, ctx, first int) int {
+	if w.costs != nil {
+		r, nz := w.costs.residual(levels, plane, ctx, first)
+		*w.rate += r
+		return nz
+	}
+	if w.enc == nil && w.stats == nil && w.rate == nil {
+		return contextOnly(levels, first)
+	}
 	last := -1
 	for n := 15; n >= first; n-- {
 		if levels[zigzag[n]] != 0 {
@@ -134,7 +144,11 @@ func (w *tokenWriter) bigCategory(plane, band, ctx int, mag int32) {
 	b1 := cat >> 1
 	w.node(plane, band, ctx, 8, b1 == 1)
 	w.node(plane, band, ctx, 9+b1, cat&1 == 1)
-	rem := mag - (catBigBase + catBigUnit<<cat)
+	w.extraBits(cat, mag-(catBigBase+catBigUnit<<cat))
+}
+
+// extraBits는 범주 3~6(cat 0~3)의 추가 비트를 고정 확률로 쓴다.
+func (w *tokenWriter) extraBits(cat int, rem int32) {
 	tab := &cat3456[cat]
 	nbits := 0
 	for tab[nbits] != 0 {
@@ -143,4 +157,14 @@ func (w *tokenWriter) bigCategory(plane, band, ctx int, mag int32) {
 	for i := range nbits {
 		w.fixed(tab[i], rem>>(nbits-1-i)&1 == 1)
 	}
+}
+
+// contextOnly는 쓰지 않고 다음 블록의 문맥(0이 아닌 계수 유무)만 낸다.
+func contextOnly(levels *[16]int32, first int) int {
+	for n := first; n < 16; n++ {
+		if levels[zigzag[n]] != 0 {
+			return 1
+		}
+	}
+	return 0
 }

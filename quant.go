@@ -11,12 +11,24 @@ const (
 	// 반올림 편향(/256): 0.5보다 작게 잡아 0 근처 계수를 0으로 보내는 데드존 — libwebp의 기본값과 같은 수준
 	biasDen  = 256
 	maxLevel = 2047 // 범주 6이 표현하는 최대 크기 근처에서 자른다
+	// 나눗셈 대신 역수 곱셈으로 양자화하는 고정소수점 정밀도 (libwebp QFIX와 같음)
+	quantFix = 17
 )
 
 // quantMatrix는 한 계수 평면의 DC/AC 양자화 단계와 편향이다.
+// iq·rbias는 q·bias에서 만든 역수 곱셈용 값이다 (setReciprocals).
 type quantMatrix struct {
-	q    [2]int32
-	bias [2]int32
+	q     [2]int32
+	bias  [2]int32
+	iq    [2]uint32
+	rbias [2]uint32
+}
+
+func (m *quantMatrix) setReciprocals() {
+	for k := range m.q {
+		m.iq[k] = (1 << quantFix) / uint32(m.q[k])
+		m.rbias[k] = uint32(m.bias[k]) << (quantFix - 8)
+	}
 }
 
 // quantizer는 한 세그먼트(또는 프레임 전체)의 양자화 설정이다.
@@ -31,12 +43,16 @@ func newQuantizer(qi, dqUVDC, dqUVAC int) quantizer {
 	uvdc := min(max(qi+dqUVDC, 0), maxUVDCIndex)
 	uvac := min(max(qi+dqUVAC, 0), maxQIndex)
 	y2ac := int32(dequantTableAC[qi]) * y2ACScaleNum / y2ACScaleDen
-	return quantizer{
+	q := quantizer{
 		qi: qi,
 		y1: quantMatrix{q: [2]int32{int32(dequantTableDC[qi]), int32(dequantTableAC[qi])}, bias: [2]int32{96, 110}},
 		y2: quantMatrix{q: [2]int32{int32(dequantTableDC[qi]) * 2, max(y2ac, minY2AC)}, bias: [2]int32{96, 108}},
 		uv: quantMatrix{q: [2]int32{int32(dequantTableDC[uvdc]), int32(dequantTableAC[uvac])}, bias: [2]int32{110, 115}},
 	}
+	q.y1.setReciprocals()
+	q.y2.setReciprocals()
+	q.uv.setReciprocals()
+	return q
 }
 
 // quantize는 자연 순서 계수 c를 양자화해 레벨을 c에 덮어쓰고, 복원(역양자화) 계수를 돌려준다.
@@ -50,7 +66,7 @@ func (m *quantMatrix) quantize(c *[16]int32, first int) [16]int32 {
 		if mag < 0 {
 			mag = -mag
 		}
-		level := min((mag*biasDen+m.bias[k]*m.q[k])/(m.q[k]*biasDen), maxLevel)
+		level := min(int32((uint32(mag)*m.iq[k]+m.rbias[k])>>quantFix), maxLevel)
 		if v < 0 {
 			level = -level
 		}

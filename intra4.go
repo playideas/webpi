@@ -25,14 +25,32 @@ type b4Edges struct {
 func avg2(a, b int32) uint8    { return uint8((a + b + 1) >> 1) }
 func avg3(a, b, c int32) uint8 { return uint8((a + 2*b + c + 2) >> 2) }
 
-// pred4Funcs는 모드별 예측기다. 공식은 RFC 6386 12.3 (x/image/vp8 predfunc.go와 같은 계산).
-var pred4Funcs = [nBModes]func(e *b4Edges, p *[16]uint8){
-	pred4DC, pred4TM, pred4VE, pred4HE, pred4RD, pred4VR, pred4LD, pred4VL, pred4HD, pred4HU,
-}
-
+// pred4는 모드별 예측기를 부른다. 공식은 RFC 6386 12.3 (x/image/vp8 predfunc.go와 같은 계산).
+// 함수 표 대신 switch를 쓰는 것은 간접 호출이 결과 배열을 힙으로 밀어내기 때문이다.
 func pred4(mode int, e *b4Edges) [16]uint8 {
 	var p [16]uint8
-	pred4Funcs[mode](e, &p)
+	switch mode {
+	case bDC:
+		pred4DC(e, &p)
+	case bTM:
+		pred4TM(e, &p)
+	case bVE:
+		pred4VE(e, &p)
+	case bHE:
+		pred4HE(e, &p)
+	case bRD:
+		pred4RD(e, &p)
+	case bVR:
+		pred4VR(e, &p)
+	case bLD:
+		pred4LD(e, &p)
+	case bVL:
+		pred4VL(e, &p)
+	case bHD:
+		pred4HD(e, &p)
+	default:
+		pred4HU(e, &p)
+	}
 	return p
 }
 
@@ -167,10 +185,9 @@ type lumaWorkspace [mbSize + 1][mbSize + 1 + 4]uint8
 
 const wsTopRight = mbSize + 1
 
-// newLumaWorkspace는 복원 평면에서 (mbx,mby) 매크로블록의 이웃을 채운다.
+// load는 복원 평면에서 (mbx,mby) 매크로블록의 이웃을 채운다.
 // 오른쪽 위 4픽셀은 블록 열 3의 아래 행들에도 복사한다 — 디코더도 MB 위쪽의 값을 그대로 쓴다.
-func newLumaWorkspace(rec *yuvPlanes, mbx, mby int) *lumaWorkspace {
-	var ws lumaWorkspace
+func (ws *lumaWorkspace) load(rec *yuvPlanes, mbx, mby int) {
 	x0, y0 := mbx*mbSize, mby*mbSize
 	e := loadEdges(rec.y, rec.ys, x0, y0, mbSize)
 	ws[0][0] = e.corner
@@ -190,7 +207,6 @@ func newLumaWorkspace(rec *yuvPlanes, mbx, mby int) *lumaWorkspace {
 			ws[by][wsTopRight+i] = tr
 		}
 	}
-	return &ws
 }
 
 // edges4는 블록 (bx,by)(4픽셀 단위)의 예측 이웃을 작업 공간에서 읽는다.
