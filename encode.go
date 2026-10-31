@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"image"
 	"io"
-	"math"
 )
 
 // 프레임 제약 — RFC 6386 9.1, 19.1
@@ -16,6 +15,9 @@ const (
 	maxFirstPartSize = 1<<19 - 1
 	defaultQuality   = 75
 	maxQuality       = 100
+	qIndexBits       = 7
+	qDeltaBits       = 4
+	filterLevelBits  = 6
 )
 
 // 휘도 16×16 모드 선택 비트 확률 — RFC 6386 11.2 (키 프레임 고정값)
@@ -37,7 +39,7 @@ type Options struct {
 
 type encoder struct {
 	src, rec *yuvPlanes
-	q        quantizer
+	seg      segmentation
 	mbs      []mbInfo
 	probs    probTable
 	useSkip  bool
@@ -64,7 +66,8 @@ func Encode(w io.Writer, m image.Image, o *Options) error {
 
 // encodeFrame은 VP8 프레임을 만들고, 검증용으로 인코더 상태(복원 평면 포함)도 돌려준다.
 func encodeFrame(m image.Image, quality float32) (*encoder, []byte, error) {
-	e := &encoder{src: toYUV420(m), q: newQuantizer(qualityToQIndex(quality)), probs: defaultTokenProb}
+	src := toYUV420(m)
+	e := &encoder{src: src, seg: newSegmentation(src, quality), probs: defaultTokenProb}
 	e.rec = &yuvPlanes{w: e.src.w, h: e.src.h, mbw: e.src.mbw, mbh: e.src.mbh, ys: e.src.ys, cs: e.src.cs,
 		y: make([]uint8, len(e.src.y)), u: make([]uint8, len(e.src.u)), v: make([]uint8, len(e.src.v))}
 	for mby := range e.src.mbh {
@@ -74,17 +77,6 @@ func encodeFrame(m image.Image, quality float32) (*encoder, []byte, error) {
 	}
 	vp8, err := e.bitstream()
 	return e, vp8, err
-}
-
-// qualityToQIndex는 cwebp와 비슷한 곡선으로 품질을 양자화 인덱스로 바꾼다 (같은 숫자가 비슷한 화질이 되게).
-func qualityToQIndex(quality float32) int {
-	c := float64(min(max(quality, 0), maxQuality)) / maxQuality
-	const knee = 0.75
-	linear := c * 2 / 3
-	if c >= knee {
-		linear = 2*c - 1
-	}
-	return int(math.Round(maxQIndex * (1 - math.Cbrt(linear))))
 }
 
 // bitstream은 확률을 정한 뒤 첫 파티션(헤더·모드)과 토큰 파티션을 써서 VP8 프레임을 만든다.
@@ -131,16 +123,19 @@ func (e *encoder) chooseSkipProb() {
 func (e *encoder) writeHeader(h *boolEncoder, stats *tokenStats) {
 	h.putBit(uniformProb, false) // 색 공간
 	h.putBit(uniformProb, false) // 클램핑 필요
-	h.putBit(uniformProb, false) // 세그먼트 없음
+	e.writeSegmentHeader(h)
 	h.putBit(uniformProb, false) // 일반 루프 필터
 	h.putUint(0, 6)              // 필터 레벨 — 골격 단계는 0
 	h.putUint(0, 3)              // 선명도
 	h.putBit(uniformProb, false) // 모드/참조별 필터 델타 없음
 	h.putUint(0, 2)              // 토큰 파티션 1개
-	h.putUint(uint32(e.q.qi), 7)
-	for range 5 {
-		h.putSignedOptional(0, 4) // y1dc, y2dc, y2ac, uvdc, uvac 델타 없음
+	// 세그먼트가 절대값으로 덮어쓰므로 기본 인덱스는 형식상 값이다
+	h.putUint(uint32(e.seg.quant[0].qi), qIndexBits)
+	for range 3 {
+		h.putSignedOptional(0, qDeltaBits) // y1dc, y2dc, y2ac 델타 없음
 	}
+	h.putSignedOptional(e.seg.dqUVDC, qDeltaBits)
+	h.putSignedOptional(e.seg.dqUVAC, qDeltaBits)
 	h.putBit(uniformProb, false) // refresh_entropy_probs
 	e.writeProbUpdates(h, stats)
 	h.putBit(uniformProb, e.useSkip)
@@ -153,6 +148,7 @@ func (e *encoder) writeHeader(h *boolEncoder, stats *tokenStats) {
 func (e *encoder) writeModes(h *boolEncoder) {
 	for i := range e.mbs {
 		mb := &e.mbs[i]
+		e.writeSegmentID(h, e.seg.ids[i])
 		if e.useSkip {
 			h.putBit(e.skipProb, mb.skip)
 		}
@@ -170,6 +166,37 @@ func (e *encoder) writeModes(h *boolEncoder) {
 				h.putBit(probUVModeHE, mb.uvMode == predTM)
 			}
 		}
+	}
+}
+
+// writeSegmentHeader는 세그먼트 사용, 세그먼트별 절대 양자화 인덱스, id 트리 확률을 쓴다 (RFC 6386 9.3).
+func (e *encoder) writeSegmentHeader(h *boolEncoder) {
+	h.putBit(uniformProb, true) // 세그먼트 사용
+	h.putBit(uniformProb, true) // 매크로블록 세그먼트 맵 갱신
+	h.putBit(uniformProb, true) // 세그먼트 값 갱신
+	h.putBit(uniformProb, true) // 절대값 모드
+	for n := range nSegments {
+		h.putSignedOptional(e.seg.quant[n].qi, qIndexBits)
+	}
+	for range nSegments {
+		h.putSignedOptional(0, filterLevelBits) // 세그먼트별 필터 레벨 없음
+	}
+	for _, p := range e.seg.probs {
+		// 255는 갱신 생략으로 표현한다
+		h.putBit(uniformProb, p != maxProb)
+		if p != maxProb {
+			h.putUint(uint32(p), probValueBits)
+		}
+	}
+}
+
+// writeSegmentID는 2단 트리로 세그먼트 id를 쓴다.
+func (e *encoder) writeSegmentID(h *boolEncoder, id uint8) {
+	h.putBit(e.seg.probs[0], id >= nSegments/2)
+	if id < nSegments/2 {
+		h.putBit(e.seg.probs[1], id == 1)
+	} else {
+		h.putBit(e.seg.probs[2], id == 3)
 	}
 }
 

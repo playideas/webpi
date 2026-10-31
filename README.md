@@ -69,5 +69,6 @@ libwebp 기능을 하나씩 끄거나 바꿔 잰 결과(libwebp 기본 `-m 4` �
 | 단계 | ssim 0.9728 크기 | vs libwebp | 원본 |
 |---|---|---|---|
 | 골격: i16 예측(SSE 최소), 고정 양자화, 루프 필터 끔, 토큰 확률 갱신 | 34.89KB | +25.5% | `bench/results/webpi-skeleton.txt` |
+| + 세그먼트 적응 양자화: DCT 분포로 MB 민감도 → k-means 4 세그먼트, SNS 50으로 세그먼트별 양자화, 색차 DC/AC 델타 | 33.30KB | +19.8% | `bench/results/webpi-segments.txt` |
 
 골격 출력은 dwebp `-yuv` 결과가 인코더의 복원 평면과 비트 단위로 같다 (`Test_encodeFrame_noLoopFilter_dwebpYUVMatchesReconstructionExactly`).

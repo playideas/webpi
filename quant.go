@@ -25,15 +25,17 @@ type quantizer struct {
 	y1, y2, uv quantMatrix
 }
 
-// newQuantizer는 기본 인덱스 qi에서 디코더와 같은 규칙으로 양자화 단계를 만든다 (델타 없음).
-func newQuantizer(qi int) quantizer {
+// newQuantizer는 기본 인덱스 qi와 색차 DC/AC 델타에서 디코더와 같은 규칙으로 양자화 단계를 만든다.
+func newQuantizer(qi, dqUVDC, dqUVAC int) quantizer {
 	qi = min(max(qi, 0), maxQIndex)
+	uvdc := min(max(qi+dqUVDC, 0), maxUVDCIndex)
+	uvac := min(max(qi+dqUVAC, 0), maxQIndex)
 	y2ac := int32(dequantTableAC[qi]) * y2ACScaleNum / y2ACScaleDen
 	return quantizer{
 		qi: qi,
 		y1: quantMatrix{q: [2]int32{int32(dequantTableDC[qi]), int32(dequantTableAC[qi])}, bias: [2]int32{96, 110}},
 		y2: quantMatrix{q: [2]int32{int32(dequantTableDC[qi]) * 2, max(y2ac, minY2AC)}, bias: [2]int32{96, 108}},
-		uv: quantMatrix{q: [2]int32{int32(dequantTableDC[min(qi, maxUVDCIndex)]), int32(dequantTableAC[qi])}, bias: [2]int32{110, 115}},
+		uv: quantMatrix{q: [2]int32{int32(dequantTableDC[uvdc]), int32(dequantTableAC[uvac])}, bias: [2]int32{110, 115}},
 	}
 }
 

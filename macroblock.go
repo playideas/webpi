@@ -22,17 +22,18 @@ type mbInfo struct {
 // 복원은 디코더와 비트 단위로 같아야 다음 블록의 예측이 어긋나지 않는다.
 func (e *encoder) encodeMB(mbx, mby int) mbInfo {
 	var mb mbInfo
+	q := &e.seg.quant[e.seg.ids[mby*e.src.mbw+mbx]]
 	x0, y0 := mbx*mbSize, mby*mbSize
 	ye := loadEdges(e.rec.y, e.rec.ys, x0, y0, mbSize)
 	mb.yMode = bestMode(e.src.y, e.src.ys, x0, y0, mbSize, &ye)
-	e.encodeLuma(&mb, predict(mb.yMode, &ye, mbSize), x0, y0)
+	e.encodeLuma(&mb, q, predict(mb.yMode, &ye, mbSize), x0, y0)
 
 	cx, cy := mbx*uvSize, mby*uvSize
 	ue := loadEdges(e.rec.u, e.rec.cs, cx, cy, uvSize)
 	ve := loadEdges(e.rec.v, e.rec.cs, cx, cy, uvSize)
 	mb.uvMode = bestChromaMode(e.src, cx, cy, &ue, &ve)
-	e.encodeChroma(&mb, e.src.u, e.rec.u, predict(mb.uvMode, &ue, uvSize), uBlockBase, cx, cy)
-	e.encodeChroma(&mb, e.src.v, e.rec.v, predict(mb.uvMode, &ve, uvSize), vBlockBase, cx, cy)
+	e.encodeChroma(&mb, q, e.src.u, e.rec.u, predict(mb.uvMode, &ue, uvSize), uBlockBase, cx, cy)
+	e.encodeChroma(&mb, q, e.src.v, e.rec.v, predict(mb.uvMode, &ve, uvSize), vBlockBase, cx, cy)
 
 	mb.skip = true
 	for b := range mb.levels {
@@ -46,7 +47,7 @@ func (e *encoder) encodeMB(mbx, mby int) mbInfo {
 }
 
 // encodeLuma는 16×16 예측 잔차를 블록 DCT + Y2(WHT)로 양자화하고 복원한다.
-func (e *encoder) encodeLuma(mb *mbInfo, pred []uint8, x0, y0 int) {
+func (e *encoder) encodeLuma(mb *mbInfo, q *quantizer, pred []uint8, x0, y0 int) {
 	var coeffs [nYBlocks][16]int32
 	var dcs [16]int32
 	for b := range nYBlocks {
@@ -62,11 +63,11 @@ func (e *encoder) encodeLuma(mb *mbInfo, pred []uint8, x0, y0 int) {
 		dcs[b] = coeffs[b][0]
 	}
 	y2 := fwht(&dcs)
-	y2deq := e.q.y2.quantize(&y2, 0)
+	y2deq := q.y2.quantize(&y2, 0)
 	mb.levels[y2Block] = y2
 	dcRec := iwht(&y2deq)
 	for b := range nYBlocks {
-		deq := e.q.y1.quantize(&coeffs[b], 1)
+		deq := q.y1.quantize(&coeffs[b], 1)
 		coeffs[b][0] = 0
 		mb.levels[b] = coeffs[b]
 		deq[0] = dcRec[b]
@@ -76,7 +77,7 @@ func (e *encoder) encodeLuma(mb *mbInfo, pred []uint8, x0, y0 int) {
 }
 
 // encodeChroma는 한 색차 평면의 8×8 잔차를 4개 블록으로 양자화하고 복원한다.
-func (e *encoder) encodeChroma(mb *mbInfo, src, rec, pred []uint8, base, cx, cy int) {
+func (e *encoder) encodeChroma(mb *mbInfo, q *quantizer, src, rec, pred []uint8, base, cx, cy int) {
 	s := e.src.cs
 	for b := range 4 {
 		bx, by := (b%2)*4, (b/2)*4
@@ -87,7 +88,7 @@ func (e *encoder) encodeChroma(mb *mbInfo, src, rec, pred []uint8, base, cx, cy 
 			}
 		}
 		c := fdct4(&res)
-		deq := e.q.uv.quantize(&c, 0)
+		deq := q.uv.quantize(&c, 0)
 		mb.levels[base+b] = c
 		storeBlock(rec, s, cx+bx, cy+by, &deq, pred, uvSize, bx, by)
 	}
