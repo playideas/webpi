@@ -184,7 +184,7 @@ func firstDiff(a, b []byte) int {
 
 func Test_levelCosts_residual_matchesTokenWriterRate(t *testing.T) {
 	costs := newLevelCosts(&defaultTokenProb)
-	cases := [][16]int32{
+	cases := [][16]int16{
 		{},
 		{1},
 		{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, -3},

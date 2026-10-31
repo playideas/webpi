@@ -26,7 +26,7 @@ type mbHeader struct {
 // mbInfo는 인코딩 중인 매크로블록의 결정과 양자화 레벨이다.
 type mbInfo struct {
 	mbHeader
-	levels [nBlocks][16]int32
+	levels [nBlocks][16]int16 // 레벨은 int16 — 후보 작업 공간·복사량이 절반이다
 }
 
 // rowCoder는 한 매크로블록 행을 인코딩하는 작업자다. 행 안에서만 이어지는 문맥(왼쪽 이웃)과
@@ -158,13 +158,11 @@ func (e *rowCoder) quantLuma16(q *quantizer, pred []uint8, x0, y0 int, c *lumaRe
 		dcs[b] = coeffs[b][0]
 	}
 	y2 := fwht(&dcs)
-	y2deq := q.y2.quantize(&y2, 0)
-	c.mb.levels[y2Block] = y2
+	y2deq := q.y2.quantize(&y2, &c.mb.levels[y2Block], 0)
 	dcRec := iwht(&y2deq)
 	for b := range nYBlocks {
-		deq := q.y1.quantize(&coeffs[b], 1)
-		coeffs[b][0] = 0
-		c.mb.levels[b] = coeffs[b]
+		deq := q.y1.quantize(&coeffs[b], &c.mb.levels[b], 1)
+		c.mb.levels[b][0] = 0
 		deq[0] = dcRec[b]
 		px := idct4Add(&deq, &preds[b])
 		copyBlock(c.rec[:], mbSize, (b%4)*4, (b/4)*4, px[:], 4)
@@ -213,7 +211,7 @@ func (e *rowCoder) pickI4(q *quantizer, lam *rdLambdas, mbx, mby int, limit int6
 
 type block4Result struct {
 	mode   uint8
-	levels [16]int32
+	levels [16]int16
 	rec    [16]uint8
 	score  rdScore
 }
@@ -284,7 +282,7 @@ func (e *rowCoder) tryBlock4(q *quantizer, lam *rdLambdas, pred *[16]uint8, m, s
 		return c
 	}
 	c.score.sd = regionTDisto(c.rec[:], 4, lam.t, e.srcT[by*4+bx:])
-	if m > 0 && isFlat([][16]int32{c.levels}, flatnessLimitI4) {
+	if m > 0 && isFlat([][16]int16{c.levels}, flatnessLimitI4) {
 		c.score.r = flatnessPenalty
 	}
 	if c.score.setScore(lam.i4); c.score.score >= limit {
@@ -354,10 +352,11 @@ func (e *rowCoder) chromaRate(mb *mbInfo, mbx int) int64 {
 }
 
 // quantBlock은 4×4 블록 하나를 변환·양자화(DC 포함)하고 레벨과 복원 픽셀을 돌려준다.
-func quantBlock(m *quantMatrix, src []uint8, s, x, y int, pred *[16]uint8) ([16]int32, [16]uint8) {
+func quantBlock(m *quantMatrix, src []uint8, s, x, y int, pred *[16]uint8) ([16]int16, [16]uint8) {
 	res := residual4(src, s, x, y, pred)
-	levels := fdct4(&res)
-	deq := m.quantize(&levels, 0)
+	coeffs := fdct4(&res)
+	var levels [16]int16
+	deq := m.quantize(&coeffs, &levels, 0)
 	return levels, idct4Add(&deq, pred)
 }
 
@@ -387,7 +386,7 @@ func copyBlock(dst []uint8, s, x, y int, src []uint8, n int) {
 	}
 }
 
-func nonZero(levels *[16]int32) bool {
+func nonZero(levels *[16]int16) bool {
 	for _, l := range levels {
 		if l != 0 {
 			return true

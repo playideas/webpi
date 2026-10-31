@@ -83,7 +83,7 @@ func (m *quantMatrix) expn() int64 {
 }
 
 // isFlat는 블록들의 0 아닌 AC 레벨 수가 limit 이하인지 본다.
-func isFlat(levels [][16]int32, limit int) bool {
+func isFlat(levels [][16]int16, limit int) bool {
 	n := 0
 	for b := range levels {
 		for _, l := range levels[b][1:] {

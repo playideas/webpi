@@ -69,7 +69,7 @@ func newLevelCosts(p *probTable) *levelCosts {
 }
 
 // residual은 tokenWriter.block과 같은 토큰열의 비용과, 0이 아닌 계수 유무를 돌려준다.
-func (c *levelCosts) residual(levels *[16]int32, plane, ctx0, first int) (int64, int) {
+func (c *levelCosts) residual(levels *[16]int16, plane, ctx0, first int) (int64, int) {
 	last := -1
 	for n := 15; n >= first; n-- {
 		if levels[zigzag[n]] != 0 {
@@ -89,7 +89,7 @@ func (c *levelCosts) residual(levels *[16]int32, plane, ctx0, first int) (int64,
 	at := &c.at[plane]
 	ctx := ctx0
 	for n := first; n <= last; n++ {
-		v := abs32(levels[zigzag[n]])
+		v := abs32(int32(levels[zigzag[n]]))
 		t := at[n][ctx]
 		if v <= maxCostLevel {
 			cost += int64(t[v])

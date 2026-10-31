@@ -55,9 +55,10 @@ func newQuantizer(qi, dqUVDC, dqUVAC int) quantizer {
 	return q
 }
 
-// quantize는 자연 순서 계수 c를 양자화해 레벨을 c에 덮어쓰고, 복원(역양자화) 계수를 돌려준다.
-// first부터 양자화한다 (Y2가 있는 휘도 블록은 DC를 따로 다루므로 1).
-func (m *quantMatrix) quantize(c *[16]int32, first int) [16]int32 {
+// quantize는 자연 순서 계수 c를 양자화해 레벨을 lv에 쓰고, 복원(역양자화) 계수를 돌려준다.
+// first부터 양자화한다 (Y2가 있는 휘도 블록은 DC를 따로 다루므로 1 — lv[0]은 건드리지 않는다).
+// 레벨은 maxLevel(2047)로 잘리므로 int16에 들어간다.
+func (m *quantMatrix) quantize(c *[16]int32, lv *[16]int16, first int) [16]int32 {
 	var deq [16]int32
 	for pos := first; pos < 16; pos++ {
 		k := b2i(pos > 0)
@@ -70,7 +71,7 @@ func (m *quantMatrix) quantize(c *[16]int32, first int) [16]int32 {
 		if v < 0 {
 			level = -level
 		}
-		c[pos] = level
+		lv[pos] = int16(level)
 		deq[pos] = level * m.q[k]
 	}
 	return deq

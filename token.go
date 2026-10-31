@@ -57,7 +57,7 @@ func (w *tokenWriter) fixed(prob uint8, bit bool) {
 
 // block은 한 4×4 블록의 레벨(자연 순서)을 first번째 지그재그 계수부터 쓰고,
 // 0이 아닌 계수가 있었는지(다음 블록의 문맥)를 돌려준다.
-func (w *tokenWriter) block(levels *[16]int32, plane, ctx, first int) int {
+func (w *tokenWriter) block(levels *[16]int16, plane, ctx, first int) int {
 	if w.costs != nil {
 		r, nz := w.costs.residual(levels, plane, ctx, first)
 		*w.rate += r
@@ -79,7 +79,7 @@ func (w *tokenWriter) block(levels *[16]int32, plane, ctx, first int) int {
 		return 0
 	}
 	for n := first; ; {
-		v := levels[zigzag[n]]
+		v := int32(levels[zigzag[n]])
 		mag := v
 		if mag < 0 {
 			mag = -mag
@@ -160,7 +160,7 @@ func (w *tokenWriter) extraBits(cat int, rem int32) {
 }
 
 // contextOnly는 쓰지 않고 다음 블록의 문맥(0이 아닌 계수 유무)만 낸다.
-func contextOnly(levels *[16]int32, first int) int {
+func contextOnly(levels *[16]int16, first int) int {
 	for n := first; n < 16; n++ {
 		if levels[zigzag[n]] != 0 {
 			return 1

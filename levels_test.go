@@ -7,12 +7,12 @@ import (
 
 func Test_packLevels_roundTrip_restoresEveryMacroblock(t *testing.T) {
 	r := rand.New(rand.NewPCG(1, 2))
-	var mbs [3][nBlocks][16]int32
+	var mbs [3][nBlocks][16]int16
 	for i := range mbs {
 		for b := range nBlocks {
 			// 블록마다 0이 아닌 계수 수를 0~16으로 달리하고 끝 쪽 계수도 섞는다
 			for k := range r.IntN(17) {
-				mbs[i][b][zigzag[k]] = int32(r.IntN(2*maxLevel+1) - maxLevel)
+				mbs[i][b][zigzag[k]] = int16(r.IntN(2*maxLevel+1) - maxLevel)
 			}
 		}
 	}
@@ -21,7 +21,7 @@ func Test_packLevels_roundTrip_restoresEveryMacroblock(t *testing.T) {
 		buf = packLevels(buf, &mbs[i])
 	}
 	for i := range mbs {
-		var got [nBlocks][16]int32
+		var got [nBlocks][16]int16
 		got[0][0] = 99 // 풀 때 이전 값이 남지 않아야 한다
 		buf = unpackLevels(buf, &got)
 		if got != mbs[i] {
