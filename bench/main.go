@@ -1,7 +1,7 @@
 // bench는 webpi의 합격 기준을 재는 하네스다 (원본: pocketlabel experiments/webp_bench, 커밋 93d3075).
 //
-// 질문: 같은 휘도 SSIM에서 각 인코더의 크기가 libwebp 대비 몇 %인가.
-// 기준 SSIM은 JPEG q85의 SSIM이다. 품질을 스윕해 곡선을 얻고, 그 SSIM에서의 크기를 보간한다.
+// 질문: 같은 품질에서 각 인코더의 크기가 libwebp 대비 몇 %인가. 품질은 여러 지표로 따로 잰다(metrics.go).
+// 지표별 기준값은 JPEG q85의 값이다. 품질을 스윕해 곡선을 얻고, 그 기준값에서의 크기를 보간한다.
 // libwebp 변형(-variants)으로 기능을 하나씩 끄면 격차가 어느 기능에서 나오는지 분해할 수 있다.
 package main
 
@@ -40,9 +40,9 @@ func main() {
 	flag.StringVar(&o.dir, "dir", "", "JPEG 원본 디렉터리")
 	// 원본이 이미 JPEG라 그대로 재압축하면 8×8 격자가 맞아 JPEG가 부당하게 유리하다 — 축소해서 격자를 깬다
 	flag.Float64Var(&o.scale, "scale", 0.75, "인코딩 전 축소 비율 (1이면 축소 안 함)")
-	flag.StringVar(&o.codecs, "codecs", "jpeg,libwebp,deepteams", "기본 코덱 (jpeg,libwebp,deepteams,linzeyan,webpi)")
+	flag.StringVar(&o.codecs, "codecs", "jpeg,libwebp,deepteams", "기본 코덱 (jpeg,libwebp,deepteams,deepteams-zero,linzeyan,webpi)")
 	flag.StringVar(&o.variants, "variants", "", `libwebp 변형 "이름=cwebp 인자;..." 예: "sns0=-sns 0;seg1=-segments 1"`)
-	flag.Float64Var(&o.target, "target", 0, "기준 SSIM (0이면 JPEG q85의 SSIM)")
+	flag.Float64Var(&o.target, "target", 0, "휘도 SSIM 기준값 (0이면 JPEG q85의 값) — 다른 지표는 항상 JPEG q85 기준")
 	// 병렬이면 인코딩 시간이 서로 간섭한다 — 속도를 볼 때는 -j 1
 	flag.IntVar(&o.jobs, "j", runtime.NumCPU(), "동시 처리 이미지 수")
 	flag.Parse()
@@ -62,14 +62,15 @@ func run(o options) error {
 		return err
 	}
 	fmt.Printf("images=%d scale=%.2f jobs=%d\n", len(imgs), o.scale, o.jobs)
-	if o.target == 0 {
-		ref, err := measure(builtinCodecs()["jpeg"], imgs, refJPEGQuality, o.jobs)
-		if err != nil {
-			return err
-		}
-		o.target = ref.ssim
+	ref, err := measure(builtinCodecs()["jpeg"], imgs, refJPEGQuality, o.jobs)
+	if err != nil {
+		return err
 	}
-	fmt.Printf("target ssim=%.4f\n", o.target)
+	targets := ref.m
+	if o.target != 0 {
+		targets[metricSSIMY] = o.target
+	}
+	fmt.Printf("targets %s\n", formatMetrics(targets))
 	curves := map[string][]point{}
 	for _, c := range cs {
 		for _, q := range qualities {
@@ -78,10 +79,10 @@ func run(o options) error {
 				return fmt.Errorf("%s q%d: %w", c.name, q, err)
 			}
 			curves[c.name] = append(curves[c.name], p)
-			fmt.Printf("%-14s q=%d  avgKB=%7.2f  ssim=%.4f  encMs=%6.1f\n", c.name, q, p.bytes/1024, p.ssim, p.encMs)
+			fmt.Printf("%-14s q=%d  avgKB=%7.2f  %s  encMs=%6.1f\n", c.name, q, p.bytes/1024, formatMetrics(p.m), p.encMs)
 		}
 	}
-	printSummary(cs, curves, o.target)
+	printSummary(cs, curves, targets)
 	return nil
 }
 
@@ -99,18 +100,43 @@ func selectCodecs(names, variants string) ([]codec, error) {
 	return append(cs, vs...), err
 }
 
-// printSummary는 기준 SSIM에서의 크기와 libwebp 대비 비율을 낸다. 합격선은 +5% 이내.
-func printSummary(cs []codec, curves map[string][]point, target float64) {
-	base := bytesAtSSIM(curves["libwebp"], target)
-	fmt.Printf("\n== ssim %.4f 에서의 크기 ==\n", target)
-	for _, c := range cs {
-		kb := bytesAtSSIM(curves[c.name], target)
-		rel := "   n/a"
-		if !math.IsNaN(base) && !math.IsNaN(kb) {
-			rel = fmt.Sprintf("%+5.1f%%", (kb/base-1)*100)
-		}
-		fmt.Printf("%-14s %7.2fKB  vs libwebp %s\n", c.name, kb/1024, rel)
+// printSummary는 지표별 기준값에서의 크기를 libwebp 대비 비율로 낸다. 합격선은 +5% 이내.
+func printSummary(cs []codec, curves map[string][]point, targets [nMetrics]float64) {
+	fmt.Printf("\n== 지표별 기준값에서의 크기 (vs libwebp) ==\n%-14s", "codec")
+	for _, n := range metricNames {
+		fmt.Printf(" %9s", n)
 	}
+	fmt.Println()
+	for _, c := range cs {
+		fmt.Printf("%-14s", c.name)
+		for k := range nMetrics {
+			base, kb := bytesAt(curves["libwebp"], k, targets[k]), bytesAt(curves[c.name], k, targets[k])
+			if math.IsNaN(base) || math.IsNaN(kb) {
+				fmt.Printf(" %9s", "n/a")
+				continue
+			}
+			fmt.Printf(" %+8.1f%%", (kb/base-1)*100)
+		}
+		fmt.Println()
+	}
+	printBDRates(cs, curves)
+}
+
+// printBDRates는 겹치는 품질 구간 전체의 평균 크기 차이(BD-rate)를 libwebp 대비로 낸다.
+func printBDRates(cs []codec, curves map[string][]point) {
+	fmt.Printf("\n== BD-rate (겹치는 구간 평균, vs libwebp) ==\n")
+	for _, c := range cs {
+		fmt.Printf("%-14s", c.name)
+		for k := range nMetrics {
+			fmt.Printf(" %+8.1f%%", bdRate(curves["libwebp"], curves[c.name], k)*100)
+		}
+		fmt.Println()
+	}
+}
+
+func formatMetrics(m [nMetrics]float64) string {
+	return fmt.Sprintf("ssimY=%.4f ssimUV=%.4f psnrYUV=%.2f psnrRGB=%.2f",
+		m[metricSSIMY], m[metricSSIMUV], m[metricPSNRYUV], m[metricPSNRRGB])
 }
 
 // measure는 한 코덱·품질에서 이미지 평균 크기·SSIM·인코딩 시간을 낸다.
@@ -132,7 +158,10 @@ func measure(c codec, imgs []*image.RGBA, q, jobs int) (point, error) {
 				if err != nil && first == nil {
 					first = err
 				}
-				sum.bytes, sum.ssim, sum.encMs = sum.bytes+p.bytes, sum.ssim+p.ssim, sum.encMs+p.encMs
+				sum.bytes, sum.encMs = sum.bytes+p.bytes, sum.encMs+p.encMs
+				for k := range nMetrics {
+					sum.m[k] += p.m[k]
+				}
 				mu.Unlock()
 			}
 		}()
@@ -143,7 +172,11 @@ func measure(c codec, imgs []*image.RGBA, q, jobs int) (point, error) {
 	close(work)
 	wg.Wait()
 	n := float64(len(imgs))
-	return point{sum.bytes / n, sum.ssim / n, sum.encMs / n}, first
+	sum.bytes, sum.encMs = sum.bytes/n, sum.encMs/n
+	for k := range nMetrics {
+		sum.m[k] /= n
+	}
+	return sum, first
 }
 
 func measureOne(c codec, img *image.RGBA, q int) (point, error) {
@@ -157,7 +190,7 @@ func measureOne(c codec, img *image.RGBA, q int) (point, error) {
 	if err != nil {
 		return point{}, fmt.Errorf("decode: %w", err)
 	}
-	return point{float64(len(b)), lumaSSIM(img, toRGBA(dec)), ms}, nil
+	return point{bytes: float64(len(b)), encMs: ms, m: allMetrics(img, toRGBA(dec))}, nil
 }
 
 func loadImages(dir string, scale float64) ([]*image.RGBA, error) {

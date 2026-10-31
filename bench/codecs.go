@@ -33,8 +33,10 @@ func builtinCodecs() map[string]codec {
 		"jpeg":      {"jpeg", encodeJPEG, decodeJPEG},
 		"libwebp":   cwebpCodec("libwebp", nil),
 		"deepteams": {"deepteams", encodeDeepteams, decodeDwebp},
-		"linzeyan":  {"linzeyan", encodeLinzeyan, decodeDwebp},
-		"webpi":     {"webpi", encodeWebpi, decodeDwebp},
+		// 초기 기준선이 쓴 설정 — 옵션 구조체를 직접 채워 SNS·필터·세그먼트가 0(꺼짐)으로 들어간다
+		"deepteams-zero": {"deepteams-zero", encodeDeepteamsZero, decodeDwebp},
+		"linzeyan":       {"linzeyan", encodeLinzeyan, decodeDwebp},
+		"webpi":          {"webpi", encodeWebpi, decodeDwebp},
 	}
 }
 
@@ -64,7 +66,17 @@ func encodeJPEG(img *image.RGBA, q int) ([]byte, error) {
 
 func decodeJPEG(b []byte) (image.Image, error) { return jpeg.Decode(bytes.NewReader(b)) }
 
+// encodeDeepteams는 deepteams의 기본 설정(libwebp 기본값과 같은 SNS 50, 필터 60, 세그먼트 4)으로 인코딩한다.
+// EncoderOptions{}의 0값은 "끔"으로 해석되므로 반드시 DefaultOptions에서 시작한다.
 func encodeDeepteams(img *image.RGBA, q int) ([]byte, error) {
+	var buf bytes.Buffer
+	o := deepteams.DefaultOptions()
+	o.Quality, o.Method = float32(q), webpMethod
+	err := deepteams.Encode(&buf, img, o)
+	return buf.Bytes(), err
+}
+
+func encodeDeepteamsZero(img *image.RGBA, q int) ([]byte, error) {
 	var buf bytes.Buffer
 	err := deepteams.Encode(&buf, img, &deepteams.EncoderOptions{Quality: float32(q), Method: webpMethod})
 	return buf.Bytes(), err
