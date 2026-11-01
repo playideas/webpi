@@ -1,0 +1,48 @@
+# 높은 품질 구간(q80~100) — go run . -dir <COCO val2017> -codecs libwebp,webpi -q 80,85,88,90,92,94,95,96,97,98,99,100 -ref libwebp:90 (그리고 :95), v0.2.3
+images=150 scale=0.75 jobs=16 ref=libwebp:90
+targets ssimY=0.9868 ssimUV=0.9541 psnrYUV=42.12 psnrRGB=37.01
+libwebp        q=80  avgKB=  26.22  ssimY=0.9705 ssimUV=0.9383 psnrYUV=38.67 psnrRGB=34.64  encMs=  73.6
+libwebp        q=85  avgKB=  32.42  ssimY=0.9789 ssimUV=0.9459 psnrYUV=40.17 psnrRGB=35.71  encMs=  71.5
+libwebp        q=88  avgKB=  37.81  ssimY=0.9838 ssimUV=0.9510 psnrYUV=41.30 psnrRGB=36.49  encMs=  71.8
+libwebp        q=90  avgKB=  42.35  ssimY=0.9868 ssimUV=0.9541 psnrYUV=42.12 psnrRGB=37.01  encMs=  72.1
+libwebp        q=92  avgKB=  47.82  ssimY=0.9896 ssimUV=0.9570 psnrYUV=43.00 psnrRGB=37.54  encMs=  70.5
+libwebp        q=94  avgKB=  55.40  ssimY=0.9921 ssimUV=0.9602 psnrYUV=43.97 psnrRGB=38.12  encMs=  70.8
+libwebp        q=95  avgKB=  59.61  ssimY=0.9931 ssimUV=0.9616 psnrYUV=44.45 psnrRGB=38.39  encMs=  69.6
+libwebp        q=96  avgKB=  63.86  ssimY=0.9940 ssimUV=0.9627 psnrYUV=44.91 psnrRGB=38.63  encMs=  69.2
+libwebp        q=97  avgKB=  68.65  ssimY=0.9948 ssimUV=0.9636 psnrYUV=45.35 psnrRGB=38.84  encMs=  73.2
+libwebp        q=98  avgKB=  73.75  ssimY=0.9955 ssimUV=0.9639 psnrYUV=45.71 psnrRGB=38.98  encMs=  70.1
+libwebp        q=99  avgKB=  78.02  ssimY=0.9962 ssimUV=0.9641 psnrYUV=46.06 psnrRGB=39.09  encMs=  70.3
+libwebp        q=100  avgKB=  79.70  ssimY=0.9963 ssimUV=0.9640 psnrYUV=46.14 psnrRGB=39.11  encMs=  73.3
+webpi          q=80  avgKB=  26.29  ssimY=0.9698 ssimUV=0.9423 psnrYUV=38.61 psnrRGB=34.73  encMs=  28.8
+webpi          q=85  avgKB=  33.22  ssimY=0.9786 ssimUV=0.9504 psnrYUV=40.17 psnrRGB=35.88  encMs=  31.7
+webpi          q=88  avgKB=  39.24  ssimY=0.9836 ssimUV=0.9554 psnrYUV=41.33 psnrRGB=36.69  encMs=  32.2
+webpi          q=90  avgKB=  44.46  ssimY=0.9865 ssimUV=0.9586 psnrYUV=42.14 psnrRGB=37.24  encMs=  32.2
+webpi          q=92  avgKB=  50.55  ssimY=0.9893 ssimUV=0.9613 psnrYUV=43.03 psnrRGB=37.78  encMs=  34.2
+webpi          q=94  avgKB=  58.26  ssimY=0.9918 ssimUV=0.9633 psnrYUV=43.96 psnrRGB=38.30  encMs=  37.4
+webpi          q=95  avgKB=  62.19  ssimY=0.9929 ssimUV=0.9637 psnrYUV=44.40 psnrRGB=38.50  encMs=  34.6
+webpi          q=96  avgKB=  66.01  ssimY=0.9938 ssimUV=0.9640 psnrYUV=44.85 psnrRGB=38.68  encMs=  36.2
+webpi          q=97  avgKB=  70.22  ssimY=0.9947 ssimUV=0.9640 psnrYUV=45.28 psnrRGB=38.83  encMs=  36.8
+webpi          q=98  avgKB=  74.73  ssimY=0.9954 ssimUV=0.9640 psnrYUV=45.63 psnrRGB=38.95  encMs=  37.6
+webpi          q=99  avgKB=  78.58  ssimY=0.9961 ssimUV=0.9640 psnrYUV=46.00 psnrRGB=39.06  encMs=  41.6
+webpi          q=100  avgKB=  80.16  ssimY=0.9962 ssimUV=0.9640 psnrYUV=46.09 psnrRGB=39.09  encMs=  40.8
+
+== 지표별 기준값에서의 크기 (vs libwebp) ==
+codec             ssim-y   ssim-uv  psnr-yuv  psnr-rgb
+libwebp            +0.0%     +0.0%     +0.0%     +0.0%
+webpi              +6.3%    -11.4%     +4.5%     -0.3%
+
+== BD-rate (겹치는 구간 평균, vs libwebp) ==
+libwebp            +0.0%     +0.0%     +0.0%     +0.0%
+webpi              +4.4%    -11.6%     +3.6%     -0.2%
+
+# 같은 스윕, 기준 libwebp q95
+targets ssimY=0.9931 ssimUV=0.9616 psnrYUV=44.45 psnrRGB=38.39
+
+== 지표별 기준값에서의 크기 (vs libwebp) ==
+codec             ssim-y   ssim-uv  psnr-yuv  psnr-rgb
+libwebp            +0.0%     +0.0%     +0.0%     +0.0%
+webpi              +6.1%    -13.1%     +4.9%     +0.7%
+
+== BD-rate (겹치는 구간 평균, vs libwebp) ==
+libwebp            +0.0%     +0.0%     +0.0%     +0.0%
+webpi              +4.4%    -11.6%     +3.6%     -0.2%
