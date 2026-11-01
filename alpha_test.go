@@ -209,10 +209,43 @@ func Test_writePrefixCode_singleSymbolAbove255_writesTwoOneBitCodes(t *testing.T
 
 // 최적 분할 표가 너무 커지는 평면은 탐욕 분할만 한다.
 func Test_optimalPasses_aboveLimit_skipsOptimalParse(t *testing.T) {
-	if got := optimalPasses(lzOptimalMaxPixels); got != lzOptimalPasses {
+	if got := optimalPasses(lzOptimalMaxPixels, lzOptimalMaxPixels); got != lzOptimalPasses {
 		t.Fatalf("한계 크기 %d회, want %d", got, lzOptimalPasses)
 	}
-	if got := optimalPasses(lzOptimalMaxPixels + 1); got != 0 {
+	if got := optimalPasses(lzOptimalMaxPixels+1, lzOptimalMaxPixels+1); got != 0 {
 		t.Fatalf("한계 초과 %d회, want 0", got)
+	}
+}
+
+// 탐욕 분할의 일치가 픽셀의 1/4보다 적게 덮는 평면(잡음 등)은 최적 분할을 하지 않는다.
+func Test_optimalPasses_lowMatchCoverage_skipsOptimalParse(t *testing.T) {
+	const n = 1000
+	if got := optimalPasses(n, n/lzMinCoverageDivisor); got != lzOptimalPasses {
+		t.Fatalf("1/4 덮음 %d회, want %d", got, lzOptimalPasses)
+	}
+	if got := optimalPasses(n, n/lzMinCoverageDivisor-1); got != 0 {
+		t.Fatalf("1/4 미만 %d회, want 0", got)
+	}
+}
+
+// 첫 최적 분할에서 모은 후보를 다시 써도, 회차마다 다시 찾은 것과 토큰이 같아야 한다.
+func Test_lz77_candidateCache_matchesRecomputedTokens(t *testing.T) {
+	r := rand.New(rand.NewPCG(7, 9))
+	const w, h = 61, 47
+	planes := map[string]func(x, y int) uint32{
+		"noise":    func(_, _ int) uint32 { return uint32(r.IntN(256)) << greenShift },
+		"levels":   func(x, y int) uint32 { return uint32((x/5+y/3)%4) << greenShift },
+		"gradient": func(x, y int) uint32 { return uint32((x*4+y)&0xff) << greenShift },
+		"mixed":    func(x, y int) uint32 { return uint32(((x*y)>>4)%7+r.IntN(2)) << greenShift },
+	}
+	for name, fn := range planes {
+		argb := make([]uint32, w*h)
+		for i := range argb {
+			argb[i] = fn(i%w, i/w)
+		}
+		cached, recomputed := lz77(argb, w), lz77WithCacheLimit(argb, w, 0)
+		if !slices.Equal(cached, recomputed) {
+			t.Fatalf("%s: 후보를 다시 쓴 토큰이 다르다 (%d개 vs %d개)", name, len(cached), len(recomputed))
+		}
 	}
 }
