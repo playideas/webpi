@@ -26,17 +26,20 @@ type histogram [maxCoeffThresh + 1]int
 func (h *histogram) add(pl []uint8, s, x0, y0 int, pred []uint8, n int) {
 	for by := 0; by < n; by += 4 {
 		for bx := 0; bx < n; bx += 4 {
-			var res [16]int32
-			for j := range 4 {
-				for i := range 4 {
-					res[j*4+i] = int32(pl[(y0+by+j)*s+x0+bx+i]) - int32(pred[(by+j)*n+bx+i])
-				}
-			}
-			for _, c := range fdct4(&res) {
-				h[min(abs32(c)>>coeffBinShift, maxCoeffThresh)]++
+			for _, b := range fdctBins(pl, s, x0+bx, y0+by, pred[by*n+bx:], n) {
+				h[b]++
 			}
 		}
 	}
+}
+
+// fdctBinsGo는 4×4 잔차의 DCT 계수마다 히스토그램 칸 min(|c|>>3, 31)을 낸다.
+func fdctBinsGo(src []uint8, s, x, y int, pred []uint8, ps int) [16]uint8 {
+	var bins [16]uint8
+	for i, c := range fdctBlockGo(src, s, x, y, pred, ps) {
+		bins[i] = uint8(min(abs32(c)>>coeffBinShift, maxCoeffThresh))
+	}
+	return bins
 }
 
 // alpha는 분포가 넓게 퍼질수록(예측이 어려울수록) 커지는 값이다.

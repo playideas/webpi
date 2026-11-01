@@ -34,13 +34,16 @@ type quantVecs struct {
 	q  [16]int32
 }
 
+// transformConsts는 SIMD 커널이 읽는 변환·양자화 상수다 (gen.py의 v12..v14 배치와 같은 순서).
+var transformConsts = [12]int32{fdctK1, fdctK2, fdctRound1, fdctRound3, fdctRound4, fdctRound12, fdctRound0, maxLevel,
+	idctC2, idctC1, idctRound, 0}
+
 func (m *quantMatrix) setReciprocals() {
 	for k := range m.q {
 		m.iq[k] = (1 << quantFix) / uint32(m.q[k])
 		m.rbias[k] = uint32(m.bias[k]) << (quantFix - 8)
 	}
-	m.vec.k = [12]int32{fdctK1, fdctK2, fdctRound1, fdctRound3, fdctRound4, fdctRound12, fdctRound0, maxLevel,
-		idctC2, idctC1, idctRound, 0}
+	m.vec.k = transformConsts
 	for pos := range 16 {
 		k := b2i(pos > 0)
 		m.vec.iq[pos], m.vec.rb[pos], m.vec.q[pos] = m.iq[k], m.rbias[k], m.q[k]

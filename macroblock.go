@@ -148,24 +148,18 @@ func (e *rowCoder) pickI16(q *quantizer, lam *rdLambdas, mbx, mby int) *lumaResu
 // quantLuma16은 16×16 예측 잔차를 블록 DCT + Y2(WHT)로 양자화하고 c.rec에 복원한다.
 func (e *rowCoder) quantLuma16(q *quantizer, pred []uint8, x0, y0 int, c *lumaResult) {
 	var coeffs [nYBlocks][16]int32
-	var preds [nYBlocks][16]uint8
 	var dcs [16]int32
 	for b := range nYBlocks {
 		bx, by := (b%4)*4, (b/4)*4
-		preds[b] = sub4(pred, mbSize, bx, by)
-		res := residual4(e.src.y, e.src.ys, x0+bx, y0+by, &preds[b])
-		coeffs[b] = fdct4(&res)
+		coeffs[b] = fdctBlock(e.src.y, e.src.ys, x0+bx, y0+by, pred[by*mbSize+bx:], mbSize)
 		dcs[b] = coeffs[b][0]
 	}
 	y2 := fwht(&dcs)
 	y2deq := q.y2.quantize(&y2, &c.mb.levels[y2Block], 0)
 	dcRec := iwht(&y2deq)
 	for b := range nYBlocks {
-		deq := q.y1.quantize(&coeffs[b], &c.mb.levels[b], 1)
-		c.mb.levels[b][0] = 0
-		deq[0] = dcRec[b]
-		px := idct4Add(&deq, &preds[b])
-		copyBlock(c.rec[:], mbSize, (b%4)*4, (b/4)*4, px[:], 4)
+		off := (b/4)*4*mbSize + (b%4)*4
+		quantBlockDC(&q.y1, &coeffs[b], dcRec[b], &c.mb.levels[b], pred[off:], mbSize, c.rec[off:], mbSize)
 	}
 }
 
@@ -276,7 +270,7 @@ func (e *rowCoder) tryBlock4(q *quantizer, lam *rdLambdas, pred *[16]uint8, m, s
 	if c.score.setScore(lam.i4); c.score.score >= limit {
 		return c
 	}
-	c.score.d = quantBlock(&q.y1, e.src.y, e.src.ys, sx, sy, pred, &c.levels, &c.rec)
+	c.score.d = quantBlock(&q.y1, e.src.y, e.src.ys, sx, sy, pred[:], 4, &c.levels, c.rec[:], 4)
 	if c.score.setScore(lam.i4); c.score.score >= limit {
 		return c
 	}
@@ -336,10 +330,8 @@ func (e *rowCoder) quantChroma(mb *mbInfo, q *quantizer, src, pred []uint8, base
 	var sse int64
 	for b := range 4 {
 		bx, by := (b%2)*4, (b/2)*4
-		p := sub4(pred, uvSize, bx, by)
-		var px [16]uint8
-		sse += quantBlock(&q.uv, src, e.src.cs, cx+bx, cy+by, &p, &mb.levels[base+b], &px)
-		copyBlock(rec, uvSize, bx, by, px[:], 4)
+		off := by*uvSize + bx
+		sse += quantBlock(&q.uv, src, e.src.cs, cx+bx, cy+by, pred[off:], uvSize, &mb.levels[base+b], rec[off:], uvSize)
 	}
 	return sse
 }
@@ -351,14 +343,34 @@ func (e *rowCoder) chromaRate(mb *mbInfo, mbx int) int64 {
 	return r
 }
 
-// quantBlockGo는 4×4 블록 하나를 변환·양자화(DC 포함)해 levels·rec에 쓰고 원본과 복원의 SSE를 돌려준다.
+// quantBlockGo는 4×4 블록 하나를 변환·양자화(DC 포함)해 levels에, 복원을 rec(stride rs)에 쓰고
+// 원본과 복원의 SSE를 돌려준다. 예측 pred는 stride ps로 읽는다.
 // SIMD 커널(quantBlock)과 결과가 비트 단위로 같아야 한다.
-func quantBlockGo(m *quantMatrix, src []uint8, s, x, y int, pred *[16]uint8, levels *[16]int16, rec *[16]uint8) int64 {
-	res := residual4(src, s, x, y, pred)
+func quantBlockGo(m *quantMatrix, src []uint8, s, x, y int, pred []uint8, ps int, levels *[16]int16, rec []uint8, rs int) int64 {
+	p := sub4(pred, ps, 0, 0)
+	res := residual4(src, s, x, y, &p)
 	coeffs := fdct4(&res)
 	deq := m.quantize(&coeffs, levels, 0)
-	*rec = idct4Add(&deq, pred)
-	return regionSSE(src, s, x, y, rec[:], 4)
+	px := idct4Add(&deq, &p)
+	copyBlock(rec, rs, 0, 0, px[:], 4)
+	return regionSSE(src, s, x, y, px[:], 4)
+}
+
+// quantBlockDCGo는 i16 휘도 블록의 AC만 양자화하고, DC는 Y2에서 복원한 dc로 바꿔 rec에 복원한다.
+func quantBlockDCGo(m *quantMatrix, coeffs *[16]int32, dc int32, levels *[16]int16, pred []uint8, ps int, rec []uint8, rs int) {
+	p := sub4(pred, ps, 0, 0)
+	deq := m.quantize(coeffs, levels, 1)
+	levels[0] = 0
+	deq[0] = dc
+	px := idct4Add(&deq, &p)
+	copyBlock(rec, rs, 0, 0, px[:], 4)
+}
+
+// fdctBlockGo는 원본 (x,y)의 4×4와 예측(stride ps)의 잔차를 순 DCT한다.
+func fdctBlockGo(src []uint8, s, x, y int, pred []uint8, ps int) [16]int32 {
+	p := sub4(pred, ps, 0, 0)
+	res := residual4(src, s, x, y, &p)
+	return fdct4(&res)
 }
 
 func residual4(src []uint8, s, x, y int, pred *[16]uint8) [16]int32 {

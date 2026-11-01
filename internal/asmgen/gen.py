@@ -45,18 +45,40 @@ R12000, R51000, R7, MAXL = "v13.s[0]", "v13.s[1]", "v13.s[2]", "v13.s[3]"
 C2, C1, R4 = "v14.s[0]", "v14.s[1]", "v14.s[2]"
 
 
-def load_quant_inputs() -> list[str]:
-    """원본·예측을 읽고 상수 벡터 v12..v14와 양자화 표 포인터 x7을 준비한다."""
+# 스크래치 범용 레지스터와 반환 레지스터 (인자는 x0..x7을 쓴다)
+TMP = "w9"
+QTAB = "x10"
+RET = "w11"
+
+
+def load_rows(dst: str, ptr: str, stride: str) -> list[str]:
+    """ptr에서 stride 간격 4행(행마다 4바이트)을 dst의 32비트 레인 0..3에 읽는다. ptr은 바뀐다."""
     s = []
-    # 원본 4행(행마다 4바이트)을 v0에, 예측 16바이트를 v1에
     for row in range(4):
-        s += ["ldr w6, [x0]", f"ins v0.s[{row}], w6"]
+        s += [f"ldr {TMP}, [{ptr}]", f"ins {dst}.s[{row}], {TMP}"]
         if row < 3:
-            s.append("add x0, x0, x1")
-    s += ["ld1 {v1.16b}, [x2]", "ld1 {v12.4s, v13.4s, v14.4s}, [x3]"]
-    s += ["add x7, x3, #48"]
-    # 잔차 int16 → 행 벡터 int32 (v4..v7)
-    s += [
+            s.append(f"add {ptr}, {ptr}, {stride}")
+    return s
+
+
+def store_rows(src: str, ptr: str, stride: str) -> list[str]:
+    """src의 32비트 레인 0..3을 ptr부터 stride 간격 4행에 쓴다. ptr은 바뀐다."""
+    s = []
+    for row in range(4):
+        s.append(f"st1 {{{src}.s}}[{row}], [{ptr}]")
+        if row < 3:
+            s.append(f"add {ptr}, {ptr}, {stride}")
+    return s
+
+
+def load_consts(kptr: str) -> list[str]:
+    """변환 상수 v12..v14를 읽는다."""
+    return [f"ld1 {{v12.4s, v13.4s, v14.4s}}, [{kptr}]"]
+
+
+def residual() -> list[str]:
+    """원본 v0 − 예측 v1 → 행 벡터 int32 v4..v7."""
+    return [
         "usubl v2.8h, v0.8b, v1.8b",
         "usubl2 v3.8h, v0.16b, v1.16b",
         "sxtl v4.4s, v2.4h",
@@ -64,7 +86,6 @@ def load_quant_inputs() -> list[str]:
         "sxtl v6.4s, v3.4h",
         "sxtl2 v7.4s, v3.8h",
     ]
-    return s
 
 
 def fdct() -> list[str]:
@@ -118,15 +139,18 @@ def fdct() -> list[str]:
     return s
 
 
-def quantize() -> list[str]:
-    """v4..v7 계수를 양자화해 레벨을 levels에 쓰고 역양자화 계수를 v24..v27에 둔다."""
+def quantize(qtab: str, levels: str, dc: str | None = None) -> list[str]:
+    """
+    v4..v7 계수를 양자화해 레벨을 levels에 쓰고 역양자화 계수를 v24..v27에 둔다.
+    qtab은 quantVecs.iq를 가리키며 바뀐다. dc가 있으면 i16 휘도처럼 레벨 0번은 0으로,
+    역양자화 0번은 dc(Y2에서 복원한 값)로 바꾼다.
+    """
     s = []
-    # 양자화: v4..v7 계수 → 레벨 v20..v23, 역양자화 v24..v27
-    s += ["ld1 {v8.4s, v9.4s, v10.4s, v11.4s}, [x7], #64"]  # iq
-    s += ["ld1 {v16.4s, v17.4s, v18.4s, v19.4s}, [x7], #64"]  # rbias
+    s += [f"ld1 {{v8.4s, v9.4s, v10.4s, v11.4s}}, [{qtab}], #64"]  # iq
+    s += [f"ld1 {{v16.4s, v17.4s, v18.4s, v19.4s}}, [{qtab}], #64"]  # rbias
     s += [f"dup v31.4s, {MAXL}"]
     for k in range(4):
-        c, iq, rb, lv = f"v{4+k}", f"v{8+k}", f"v{16+k}", f"v{20+k}"
+        c, iq, rb, lv = f"v{4 + k}", f"v{8 + k}", f"v{16 + k}", f"v{20 + k}"
         s += [
             f"sshr v28.4s, {c}.4s, #31",
             f"abs v29.4s, {c}.4s",
@@ -136,16 +160,20 @@ def quantize() -> list[str]:
             f"eor {lv}.16b, {lv}.16b, v28.16b",
             f"sub {lv}.4s, {lv}.4s, v28.4s",
         ]
+    if dc is not None:
+        s.append("mov v20.s[0], wzr")
     s += [
         "xtn v28.4h, v20.4s",
         "xtn2 v28.8h, v21.4s",
         "xtn v29.4h, v22.4s",
         "xtn2 v29.8h, v23.4s",
-        "st1 {v28.8h, v29.8h}, [x4]",
-        "ld1 {v8.4s, v9.4s, v10.4s, v11.4s}, [x7]",  # q
+        f"st1 {{v28.8h, v29.8h}}, [{levels}]",
+        f"ld1 {{v8.4s, v9.4s, v10.4s, v11.4s}}, [{qtab}]",  # q
     ]
     for k in range(4):
-        s.append(f"mul v{24+k}.4s, v{20+k}.4s, v{8+k}.4s")
+        s.append(f"mul v{24 + k}.4s, v{20 + k}.4s, v{8 + k}.4s")
+    if dc is not None:
+        s.append(f"mov v24.s[0], {dc}")
     return s
 
 
@@ -192,8 +220,8 @@ def idct() -> list[str]:
     return s
 
 
-def reconstruct_sse() -> list[str]:
-    """예측에 더해 rec에 쓰고 SSE를 w6에 둔다."""
+def reconstruct(rec: str, rstride: str) -> list[str]:
+    """역 DCT 결과(v4..v7)를 예측 v1에 더해 v30에 두고 rec부터 rstride 간격 4행에 쓴다."""
     s = []
     # 레인 j = 행 j인 열 벡터 → 행 벡터로 전치 후 예측에 포화 덧셈, 0~255로 포화 축소
     s += transpose(["v4", "v5", "v6", "v7"], ["v16", "v17", "v18", "v19"], ["v20", "v21", "v22", "v23"])
@@ -208,10 +236,13 @@ def reconstruct_sse() -> list[str]:
         "sqadd v25.8h, v25.8h, v27.8h",
         "sqxtun v30.8b, v24.8h",
         "sqxtun2 v30.16b, v25.8h",
-        "st1 {v30.16b}, [x5]",
     ]
-    # SSE(원본, 복원)
-    s += [
+    return s + store_rows("v30", rec, rstride)
+
+
+def sse() -> list[str]:
+    """원본 v0과 복원 v30의 SSE를 RET에 둔다."""
+    return [
         "usubl v2.8h, v30.8b, v0.8b",
         "usubl2 v3.8h, v30.16b, v0.16b",
         "smull v4.4s, v2.4h, v2.4h",
@@ -219,69 +250,121 @@ def reconstruct_sse() -> list[str]:
         "smlal v4.4s, v3.4h, v3.4h",
         "smlal2 v4.4s, v3.8h, v3.8h",
         "addv s4, v4.4s",
-        "fmov w6, s4",
+        f"fmov {RET}, s4",
     ]
-    return s
 
 
 def quant_block4() -> list[str]:
     """
-    quantBlock4(src *uint8, stride int, pred *[16]uint8, qv *quantVecs, levels *[16]int16, rec *[16]uint8) uint32
-    x0=src x1=stride x2=pred x3=qv x4=levels x5=rec. 반환은 w6 (원본과 복원의 SSE).
-    Go의 residual4 → fdct4 → quantize → idct4Add → regionSSE와 비트 단위로 같다.
+    x0=src x1=stride x2=pred x3=pstride x4=qv x5=levels x6=rec x7=rstride. 반환은 원본과 복원의 SSE.
+    Go의 quantBlockGo(잔차 → fdct4 → quantize → idct4Add → regionSSE)와 비트 단위로 같다.
     """
-    return load_quant_inputs() + fdct() + quantize() + idct() + reconstruct_sse()
+    s = load_rows("v0", "x0", "x1") + load_rows("v1", "x2", "x3") + load_consts("x4")
+    s += [f"add {QTAB}, x4, #48"]
+    return s + residual() + fdct() + quantize(QTAB, "x5") + idct() + reconstruct("x6", "x7") + sse()
 
 
-def satd4() -> list[str]:
+def quant_dc4() -> list[str]:
     """
-    satd4NEON(src *uint8, stride int, pred *[16]uint8) uint32
-    잔차 4×4의 하다마드 계수 절대합. 덧셈만 쓰므로 세로 단계를 먼저 하고 전치 한 번 뒤 가로 단계를 해도
-    Go(가로 → 세로)와 값이 같다. 계수 순서는 절대합에 영향이 없다.
+    x0=coeffs x1=dc x2=qv x3=levels x4=pred x5=pstride x6=rec x7=rstride. 반환 없음.
+    i16 휘도 블록: AC만 양자화하고 DC는 Y2에서 복원한 dc로 바꿔 역변환한다 (quantBlockDCGo와 같음).
     """
-    s = []
-    for row in range(4):
-        s += ["ldr w6, [x0]", f"ins v0.s[{row}], w6"]
-        if row < 3:
-            s.append("add x0, x0, x1")
-    s += [
-        "ld1 {v1.16b}, [x2]",
-        "usubl v2.8h, v0.8b, v1.8b",
-        "usubl2 v3.8h, v0.16b, v1.16b",
-        "sxtl v4.4s, v2.4h",
-        "sxtl2 v5.4s, v2.8h",
-        "sxtl v6.4s, v3.4h",
-        "sxtl2 v7.4s, v3.8h",
+    s = ["ld1 {v4.4s, v5.4s, v6.4s, v7.4s}, [x0]"] + load_rows("v1", "x4", "x5") + load_consts("x2")
+    s += [f"add {QTAB}, x2, #48"]
+    return s + quantize(QTAB, "x3", dc="w1") + idct() + reconstruct("x6", "x7")
+
+
+def fdct_block4() -> list[str]:
+    """x0=src x1=stride x2=pred x3=pstride x4=k x5=out. 잔차의 순 DCT 계수를 out에 쓴다 (fdctBlockGo와 같음)."""
+    s = load_rows("v0", "x0", "x1") + load_rows("v1", "x2", "x3") + load_consts("x4")
+    return s + residual() + fdct() + ["st1 {v4.4s, v5.4s, v6.4s, v7.4s}, [x5]"]
+
+
+def fdct_bins4() -> list[str]:
+    """
+    x0=src x1=stride x2=pred x3=pstride x4=k x5=bins. 분석 히스토그램용으로 계수마다
+    min(|c|>>3, 31)을 bins에 쓴다 (fdctBinsGo와 같음).
+    """
+    s = load_rows("v0", "x0", "x1") + load_rows("v1", "x2", "x3") + load_consts("x4")
+    s += residual() + fdct() + ["movi v28.4s, #31"]
+    for k in range(4):
+        r = f"v{4 + k}"
+        s += [f"abs {r}.4s, {r}.4s", f"ushr {r}.4s, {r}.4s, #3", f"umin {r}.4s, {r}.4s, v28.4s"]
+    return s + [
+        "xtn v16.4h, v4.4s",
+        "xtn2 v16.8h, v5.4s",
+        "xtn v17.4h, v6.4s",
+        "xtn2 v17.8h, v7.4s",
+        "xtn v18.8b, v16.8h",
+        "xtn2 v18.16b, v17.8h",
+        "st1 {v18.16b}, [x5]",
     ]
 
-    def butterfly(r: list[str]) -> list[str]:
-        # 출력: r0+r1+r2+r3, (r0-r2)+(r1-r3), (r0-r2)-(r1-r3), (r0+r2)-(r1+r3) → v4..v7
-        return [
-            f"add v24.4s, {r[0]}.4s, {r[2]}.4s",
-            f"add v25.4s, {r[1]}.4s, {r[3]}.4s",
-            f"sub v26.4s, {r[1]}.4s, {r[3]}.4s",
-            f"sub v27.4s, {r[0]}.4s, {r[2]}.4s",
-            "add v4.4s, v24.4s, v25.4s",
-            "add v5.4s, v27.4s, v26.4s",
-            "sub v6.4s, v27.4s, v26.4s",
-            "sub v7.4s, v24.4s, v25.4s",
-        ]
 
-    s += butterfly(["v4", "v5", "v6", "v7"])
-    s += transpose(["v4", "v5", "v6", "v7"], ["v16", "v17", "v18", "v19"], ["v20", "v21", "v22", "v23"])
-    s += butterfly(["v20", "v21", "v22", "v23"])
-    s += [
-        "abs v4.4s, v4.4s",
-        "abs v5.4s, v5.4s",
-        "abs v6.4s, v6.4s",
-        "abs v7.4s, v7.4s",
+def hadamard(r: list[str]) -> list[str]:
+    """벡터 r0..r3에 Go와 같은 하다마드 나비를 건다: r0+r1+r2+r3, (r0-r2)+(r1-r3), (r0-r2)-(r1-r3), (r0+r2)-(r1+r3) → v4..v7."""
+    return [
+        f"add v24.4s, {r[0]}.4s, {r[2]}.4s",
+        f"add v25.4s, {r[1]}.4s, {r[3]}.4s",
+        f"sub v26.4s, {r[1]}.4s, {r[3]}.4s",
+        f"sub v27.4s, {r[0]}.4s, {r[2]}.4s",
+        "add v4.4s, v24.4s, v25.4s",
+        "add v5.4s, v27.4s, v26.4s",
+        "sub v6.4s, v27.4s, v26.4s",
+        "sub v7.4s, v24.4s, v25.4s",
+    ]
+
+
+def sum_abs(weights: str | None = None) -> list[str]:
+    """v4..v7의 절대값(weights가 있으면 v8..v11 가중치를 곱해) 합을 RET에 둔다."""
+    s = [f"abs v{4 + k}.4s, v{4 + k}.4s" for k in range(4)]
+    if weights is not None:
+        s += [f"ld1 {{v8.4s, v9.4s, v10.4s, v11.4s}}, [{weights}]"]
+        s += [f"mul v{4 + k}.4s, v{4 + k}.4s, v{8 + k}.4s" for k in range(4)]
+    return s + [
         "add v4.4s, v4.4s, v5.4s",
         "add v6.4s, v6.4s, v7.4s",
         "add v4.4s, v4.4s, v6.4s",
         "addv s4, v4.4s",
-        "fmov w6, s4",
+        f"fmov {RET}, s4",
     ]
-    return s
+
+
+T_REGS = (["v16", "v17", "v18", "v19"], ["v20", "v21", "v22", "v23"])
+
+
+def satd4() -> list[str]:
+    """
+    x0=src x1=stride x2=pred(16바이트 연속). 잔차 4×4의 하다마드 계수 절대합.
+    덧셈만 쓰므로 세로 단계를 먼저 하고 전치 한 번 뒤 가로 단계를 해도 Go(가로 → 세로)와 값이 같다.
+    계수 순서는 절대합에 영향이 없다.
+    """
+    s = load_rows("v0", "x0", "x1") + ["ld1 {v1.16b}, [x2]"] + residual()
+    s += hadamard(["v4", "v5", "v6", "v7"])
+    s += transpose(["v4", "v5", "v6", "v7"], *T_REGS)
+    return s + hadamard(T_REGS[1]) + sum_abs()
+
+
+def ttransform4() -> list[str]:
+    """
+    x0=in x1=stride x2=w. 4×4 픽셀의 가중 하다마드 에너지 (ttransformGo와 같음).
+    가중치가 계수 위치마다 다르므로 Go와 같은 순서(가로 → 세로)로 계산해 출력 배치를 맞춘다:
+    마지막 나비의 출력 v가 레인 k에 계수 (v, k)를 두고, 가중치 w[4v+k]가 v행에 그대로 놓인다.
+    """
+    s = load_rows("v0", "x0", "x1")
+    s += [
+        "uxtl v2.8h, v0.8b",
+        "uxtl2 v3.8h, v0.16b",
+        "uxtl v4.4s, v2.4h",
+        "uxtl2 v5.4s, v2.8h",
+        "uxtl v6.4s, v3.4h",
+        "uxtl2 v7.4s, v3.8h",
+    ]
+    # 가로: 열 벡터(레인 = 행)에 나비 → v4..v7 = 출력 k, 레인 = 행
+    s += transpose(["v4", "v5", "v6", "v7"], *T_REGS) + hadamard(T_REGS[1])
+    # 세로: 다시 전치해 tmp 행 벡터(레인 = k)에 나비 → 출력 v, 레인 = k
+    s += transpose(["v4", "v5", "v6", "v7"], *T_REGS) + hadamard(T_REGS[1])
+    return s + sum_abs("x2")
 
 
 def assemble(lines: list[str]) -> list[int]:
@@ -296,15 +379,14 @@ def assemble(lines: list[str]) -> list[int]:
     return words
 
 
-# (이름, Go 선언, 인자 이름 목록, 반환 오프셋, 본문)
+# (이름, 인자 이름 목록, 반환 여부, 본문). Go 선언은 kernels_arm64.go에 있다.
 KERNELS = [
-    (
-        "quantBlock4",
-        "func quantBlock4(src *uint8, stride int, pred *[16]uint8, qv *quantVecs, levels *[16]int16, rec *[16]uint8) uint32",
-        ["src", "stride", "pred", "qv", "levels", "rec"],
-        quant_block4,
-    ),
-    ("satd4NEON", "func satd4NEON(src *uint8, stride int, pred *[16]uint8) uint32", ["src", "stride", "pred"], satd4),
+    ("quantBlock4", ["src", "stride", "pred", "pstride", "qv", "levels", "rec", "rstride"], True, quant_block4),
+    ("quantDC4", ["coeffs", "dc", "qv", "levels", "pred", "pstride", "rec", "rstride"], False, quant_dc4),
+    ("fdctBlock4", ["src", "stride", "pred", "pstride", "k", "out"], False, fdct_block4),
+    ("fdctBins4", ["src", "stride", "pred", "pstride", "k", "bins"], False, fdct_bins4),
+    ("satd4NEON", ["src", "stride", "pred"], True, satd4),
+    ("ttransform4", ["in", "stride", "w"], True, ttransform4),
 ]
 
 
@@ -316,14 +398,16 @@ def emit() -> str:
         "",
         '#include "textflag.h"',
     ]
-    for name, decl, args, body_fn in KERNELS:
+    for name, args, has_ret, body_fn in KERNELS:
         body = body_fn()
         words = assemble(body)
-        ret = len(args) * 8
-        out += ["", f"// {decl}", f"TEXT ·{name}(SB), NOSPLIT, $0-{ret + 4}"]
+        frame = len(args) * 8
+        out += ["", f"TEXT ·{name}(SB), NOSPLIT, $0-{frame + 4 if has_ret else frame}"]
         out += [f"\tMOVD {a}+{i * 8}(FP), R{i}" for i, a in enumerate(args)]
         out += [f"\tWORD ${w:#010x} // {line}" for w, line in zip(words, body)]
-        out += [f"\tMOVW R6, ret+{ret}(FP)", "\tRET"]
+        if has_ret:
+            out.append(f"\tMOVW R{RET[1:]}, ret+{frame}(FP)")
+        out.append("\tRET")
     return "\n".join(out) + "\n"
 
 

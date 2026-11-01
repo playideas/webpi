@@ -50,26 +50,33 @@ func loadEdges(pl []uint8, s, x0, y0, n int) edges {
 type predBuf [mbSize * mbSize]uint8
 
 // predict는 모드 mode로 n×n 예측 블록(행 우선)을 buf에 만들어 그 앞부분을 돌려준다.
+// 모드 분기는 블록마다 한 번만 하고 행 단위로 채운다.
 func predict(mode int, e *edges, n int, buf *predBuf) []uint8 {
 	out := buf[:n*n]
-	for j := range n {
-		for i := range n {
-			var v uint8
-			switch mode {
-			case predTM:
-				v = clip8(int32(e.left[j]) + int32(e.top[i]) - int32(e.corner))
-			case predVE:
-				v = e.top[i]
-			case predHE:
-				v = e.left[j]
-			}
-			out[j*n+i] = v
-		}
-	}
-	if mode == predDC {
+	switch mode {
+	case predDC:
 		dc := dcValue(e, n)
 		for i := range out {
 			out[i] = dc
+		}
+	case predTM:
+		for j := range n {
+			d := int32(e.left[j]) - int32(e.corner)
+			row := out[j*n : j*n+n]
+			for i := range row {
+				row[i] = clip8(int32(e.top[i]) + d)
+			}
+		}
+	case predVE:
+		for j := range n {
+			copy(out[j*n:j*n+n], e.top[:n])
+		}
+	case predHE:
+		for j := range n {
+			row := out[j*n : j*n+n]
+			for i := range row {
+				row[i] = e.left[j]
+			}
 		}
 	}
 	return out

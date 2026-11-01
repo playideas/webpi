@@ -101,7 +101,7 @@ func isFlat(levels [][16]int16, limit int) bool {
 // tdistoWeight는 저주파를 더 무겁게 보는 하다마드 계수 가중치다 (libwebp kWeightY).
 var tdistoWeight = [16]int32{38, 32, 20, 9, 32, 28, 17, 7, 20, 17, 10, 4, 9, 7, 4, 2}
 
-func ttransform(in []uint8, s int) int32 {
+func ttransformGo(in []uint8, s int) int32 {
 	var tmp [16]int32
 	for i := range 4 {
 		r := in[i*s:]
