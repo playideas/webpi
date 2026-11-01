@@ -185,3 +185,34 @@ func Test_Encode_translucentNRGBA_writesExtendedFormat(t *testing.T) {
 		t.Fatalf("둘째 청크 %q, want %q", got, fourccALPH)
 	}
 }
+
+// 단순 부호로 못 쓰는 기호(256 이상) 하나뿐인 부호는, 디코더가 0비트로 읽는 길이 1 부호 대신
+// 쓰이지 않는 기호를 더해 두 기호 모두 1비트인 완전한 부호가 되어야 한다.
+func Test_writePrefixCode_singleSymbolAbove255_writesTwoOneBitCodes(t *testing.T) {
+	const sym = numLiteralCodes + 5
+	counts := make([]uint32, greenAlphabet)
+	counts[sym] = 9
+	c := writePrefixCode(&bitWriter{}, counts)
+	used := 0
+	for s, l := range c.lengths {
+		if l != 0 {
+			used++
+			if l != 1 {
+				t.Fatalf("기호 %d 길이 %d", s, l)
+			}
+		}
+	}
+	if used != 2 || c.lengths[sym] != 1 || counts[0] != 0 {
+		t.Fatalf("쓰인 기호 %d개, 대상 길이 %d, 입력 빈도가 바뀜 %v", used, c.lengths[sym], counts[0] != 0)
+	}
+}
+
+// 최적 분할 표가 너무 커지는 평면은 탐욕 분할만 한다.
+func Test_optimalPasses_aboveLimit_skipsOptimalParse(t *testing.T) {
+	if got := optimalPasses(lzOptimalMaxPixels); got != lzOptimalPasses {
+		t.Fatalf("한계 크기 %d회, want %d", got, lzOptimalPasses)
+	}
+	if got := optimalPasses(lzOptimalMaxPixels + 1); got != 0 {
+		t.Fatalf("한계 초과 %d회, want 0", got)
+	}
+}

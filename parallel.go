@@ -17,7 +17,7 @@ func rowWorkers(n int) int {
 // 작업자에서 난 패닉은 모두 끝난 뒤 부른 고루틴에서 다시 일으킨다 (처음 것 하나, 원래 스택 포함).
 func parallelRows(n int, fn func(w, y int)) {
 	var next atomic.Int32
-	var first atomic.Pointer[panicError]
+	var first atomic.Pointer[PanicError]
 	var wg sync.WaitGroup
 	for w := range rowWorkers(n) {
 		wg.Add(1)
