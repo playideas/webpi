@@ -1,4 +1,4 @@
-// bench는 webpi의 합격 기준을 재는 하네스다 (원본: pocketlabel experiments/webp_bench, 커밋 93d3075).
+// bench는 webpi의 합격 기준을 재는 하네스다.
 //
 // 질문: 같은 품질에서 각 인코더의 크기가 libwebp 대비 몇 %인가. 품질은 여러 지표로 따로 잰다(metrics.go).
 // 지표별 기준값은 JPEG q85의 값이다. 품질을 스윕해 곡선을 얻고, 그 기준값에서의 크기를 보간한다.
@@ -26,7 +26,7 @@ import (
 // 품질 설정 스윕 — 변형마다 기준 SSIM을 감싸는 곡선이 필요해 넓게 잡는다
 var qualities = []int{40, 50, 60, 70, 75, 80, 85, 90, 95}
 
-// 기준 SSIM을 정하는 JPEG 품질 — pocketlabel 축소본의 현재 설정
+// 기준 SSIM을 정하는 JPEG 품질 — 비교 기준으로 삼은 JPEG 설정
 const refJPEGQuality = 85
 
 type options struct {

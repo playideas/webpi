@@ -6,8 +6,8 @@ arm64에서는 NEON 어셈블리 커널을 기본으로 쓰고, `go build -tags 
 
 ## 왜 만드나
 
-pocketlabel(단일 바이너리 라벨링 서버)은 cgo 없이 크로스 컴파일해야 해서 libwebp를 못 쓴다.
-기존 순수 Go 인코더를 재 보니 (2026-10-31, pocketlabel `experiments/webp_bench`, 커밋 93d3075):
+cgo 없이 크로스 컴파일해야 하는 단일 바이너리 서버에서는 libwebp를 쓸 수 없다.
+기존 순수 Go 인코더를 재 보니 (2026-10-31):
 
 JPEG q85와 같은 화질(휘도 SSIM 0.9705)에서의 크기 — COCO val2017 99장, 0.75배 축소
 
@@ -29,7 +29,7 @@ JPEG q85와 같은 화질(휘도 SSIM 0.9705)에서의 크기 — COCO val2017 9
 
 ## 측정 방법과 이미 밟은 함정
 
-- 하네스 원본: `~/git/pocketlabel/experiments/webp_bench` (품질 스윕 → 같은 SSIM에서 크기 보간)
+- 하네스: `bench/` (품질 스윕 → 같은 SSIM에서 크기 보간)
 - **원본이 JPEG면 축소 없이 재압축하지 말 것** — 8×8 격자가 맞아 JPEG가 부당하게 유리해진다
 - **WebP는 dwebp로 디코딩할 것** — x/image/webp는 크로마 업샘플링이 달라 SSIM이 0.989만큼 어긋나 WebP 점수가 깎였다
 - 휘도 SSIM 하나만 재 왔다. 큰 이미지(2048px)와 다른 지표(예: 크로마 포함, butteraugli 계열)로도 확인할 것
@@ -37,7 +37,8 @@ JPEG q85와 같은 화질(휘도 SSIM 0.9705)에서의 크기 — COCO val2017 9
 ## 참고
 
 - VP8 비트스트림: RFC 6386. 컨테이너: Google WebP Container Specification
-- libwebp는 BSD-3. 코드를 옮겨 오면 고지 의무가 생긴다 — 명세 기반 구현이면 불필요
+- 일부 절차와 상수(분석·세그먼트, 양자화 바이어스, 레벨 비용 표, RD 가중치 등)는 libwebp를 따랐다.
+  libwebp의 BSD-3 고지는 [THIRD_PARTY_NOTICES](THIRD_PARTY_NOTICES)에 있다
 
 ## 기준선과 격차 분해 (2026-10-31, `bench/`)
 
@@ -130,4 +131,4 @@ webpi가 두 deepteams 설정 모두를 네 지표·두 측정 방식 전부에�
 
 ## 라이선스
 
-MIT — [LICENSE](LICENSE)
+MIT — [LICENSE](LICENSE). libwebp에서 온 부분의 고지는 [THIRD_PARTY_NOTICES](THIRD_PARTY_NOTICES)
