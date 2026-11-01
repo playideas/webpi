@@ -171,10 +171,16 @@ func (e *rowCoder) lumaRate(mb *mbInfo, mbx int) int64 {
 	return r
 }
 
+// i4 모드 헤더 비트의 매크로블록당 처음 예산 — 4×4 블록당 16비트 (libwebp max_i4_header_bits_)
+const i4HeaderBudget = 16 * costOne * nYBlocks
+
 // pickI4는 4×4 블록마다 10개 모드 중 가장 좋은 것을 고른다. 누적 점수가 limit(i16 점수)을
-// 넘는 순간 포기한다.
+// 넘거나 모드 헤더 비트가 e.i4Budget을 넘는 순간 포기한다.
 // 결과는 e.i4에 남는다.
 func (e *rowCoder) pickI4(q *quantizer, lam *rdLambdas, mbx, mby int, limit int64) bool {
+	if e.i4Budget == 0 {
+		return false
+	}
 	ws := &e.ws
 	ws.load(e.rec, mbx, mby)
 	res := &e.i4
@@ -183,13 +189,14 @@ func (e *rowCoder) pickI4(q *quantizer, lam *rdLambdas, mbx, mby int, limit int6
 	res.score.h = i4HeaderCost
 	res.score.setScore(lam.mode)
 	tnz, lnz := e.nzTop[mbx], e.nzLeft
+	var headerBits int64
 	for b := range nYBlocks {
 		bx, by := b%4, b/4
 		above, left := e.modes.neighbors(&res.mb.mbHeader, mbx, b)
 		blk := e.pickBlock4(q, lam, ws, mbx*mbSize+bx*4, mby*mbSize+by*4, bx, by, above, left, tnz[bx]+lnz[by])
 		blk.score.setScore(lam.mode)
 		res.score.add(&blk.score)
-		if res.score.score >= limit {
+		if headerBits += blk.score.h; res.score.score >= limit || headerBits > e.i4Budget {
 			return false
 		}
 		res.mb.bModes[b], res.mb.levels[b] = blk.mode, blk.levels
