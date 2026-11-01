@@ -56,7 +56,7 @@ func Test_startAlpha_encoderPanics_returnsPanicError(t *testing.T) {
 
 // 한 행이 중간에 패닉해도 그 행을 기다리는 아랫행들이 멈추지 않고, 패닉이 부른 쪽으로 올라와야 한다.
 func Test_encodeRows_panicMidRow_doesNotDeadlock(t *testing.T) {
-	e := newEncoder(toYUV420(syntheticImage(96, 96)), defaultQuality)
+	e := newEncoder(toYUV420(syntheticImage(96, 96), nil), defaultQuality)
 	// 셋째 행 둘째 매크로블록부터 헤더 자리가 없어 인덱스 패닉이 난다
 	e.mbs = e.mbs[:2*e.src.mbw+1]
 	defer func() {

@@ -15,11 +15,13 @@ type nzContext [9]int
 
 const nzY2 = 8
 
-// writeTokens는 모든 매크로블록의 계수 토큰을 래스터 순서로 쓴다 (문맥은 디코더와 같게 유지).
-func (e *encoder) writeTokens(w *tokenWriter) {
+// writeTokens는 모든 매크로블록의 계수 토큰을 래스터 순서로 파티션 ws에 나눠 쓴다 (문맥은 디코더와 같게 유지).
+func (e *encoder) writeTokens(ws []*tokenWriter) {
 	top := make([]nzContext, e.src.mbw)
 	var mb mbInfo
 	for mby := range e.src.mbh {
+		// 행마다 파티션을 돌아가며 쓴다 — 문맥(top·left)은 파티션과 상관없이 래스터 순서로 이어진다
+		w := ws[mby%len(ws)]
 		var left nzContext
 		coefs := e.coefs[mby]
 		for mbx := range e.src.mbw {

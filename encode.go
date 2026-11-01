@@ -13,16 +13,22 @@ import (
 const (
 	maxDimension     = 1<<14 - 1
 	maxFirstPartSize = 1<<19 - 1
-	defaultQuality   = 75
-	maxQuality       = 100
-	qIndexBits       = 7
-	qDeltaBits       = 4
-	filterLevelBits  = 6
+	// 토큰 파티션 크기 상한 — 마지막이 아닌 파티션은 크기 필드가 24비트다. x/image/webp는 마지막 파티션도
+	// 이 크기를 넘으면 거부하므로 모든 파티션을 이보다 작게 둔다
+	maxTokenPartSize = 1 << 24
+	// 토큰 파티션 수의 log2 상한 (1·2·4·8개)
+	maxPartsLog2      = 3
+	partSizeFieldSize = 3
+	defaultQuality    = 75
+	maxQuality        = 100
+	qIndexBits        = 7
+	qDeltaBits        = 4
+	filterLevelBits   = 6
 )
 
 // Options는 인코딩 설정이다.
 type Options struct {
-	// Quality는 0~100. 클수록 화질이 높고 파일이 크다.
+	// Quality는 0~100. 클수록 화질이 높고 파일이 크다. 범위 밖 값은 0이나 100으로 자르고, NaN이면 Encode가 오류를 돌려준다.
 	Quality float32
 }
 
@@ -39,6 +45,8 @@ type encoder struct {
 	costs    *levelCosts // probs에 맞춘 RD 비용 표
 	useSkip  bool
 	skipProb uint8
+	// 매크로블록당 i4 모드 헤더 비트 예산 (1/256비트). 첫 파티션이 넘치면 줄여 다시 인코딩한다
+	i4Budget int64
 }
 
 // Encode는 m을 lossy WebP로 w에 쓴다. 알파가 있으면 VP8L 무손실로 압축해 함께 담는다.
@@ -53,6 +61,9 @@ func Encode(w io.Writer, m image.Image, o *Options) (err error) {
 	quality := float32(defaultQuality)
 	if o != nil {
 		quality = o.Quality
+	}
+	if quality != quality {
+		return errors.New("webpi: 품질이 NaN")
 	}
 	alpha := alphaPlane(m)
 	if alpha == nil {
@@ -97,19 +108,30 @@ func startAlpha(encode func() []byte) <-chan alphaResult {
 // encodeFrame은 VP8 프레임을 만들고, 검증용으로 인코더 상태(복원 평면 포함)도 돌려준다.
 // alpha가 있으면 투명 영역의 색을 먼저 평탄하게 정리한다.
 func encodeFrame(m image.Image, alpha []uint8, quality float32) (*encoder, []byte, error) {
-	src := toYUV420(m)
+	src := toYUV420(m, alpha)
 	if alpha != nil {
 		cleanupTransparent(src, alpha)
 	}
-	e := newEncoder(src, quality)
-	stats := e.encodeRows()
-	vp8, err := e.bitstream(stats)
-	return e, vp8, err
+	// 첫 파티션(모드 헤더)이 규격 한도를 넘으면 libwebp처럼 i4 헤더 예산을 반으로 줄여 처음부터 다시
+	// 인코딩한다. 높은 품질의 큰 사진은 i4를 많이 골라 넘치기 쉽다. 예산이 0(i4 없음)인데도 넘치면 오류다.
+	// 판단 PD-20261101-6d62647f: 첫 파티션이 넘치면 오류 대신 i4 예산을 줄여 다시 인코딩한다
+	for budget := int64(i4HeaderBudget); ; budget >>= 1 {
+		e := newEncoder(src, quality)
+		e.i4Budget = budget
+		stats := e.encodeRows()
+		vp8, err := e.bitstream(stats)
+		if !errors.Is(err, errFirstPartitionOverflow) || budget == 0 {
+			return e, vp8, err
+		}
+	}
 }
+
+// errFirstPartitionOverflow는 첫 파티션이 프레임 태그의 19비트 크기 필드를 넘는다는 뜻이다.
+var errFirstPartitionOverflow = errors.New("webpi: 첫 파티션이 너무 큼")
 
 // newEncoder는 원본 평면과 품질로 세그먼트·λ·버퍼를 준비한 인코더를 만든다.
 func newEncoder(src *yuvPlanes, quality float32) *encoder {
-	e := &encoder{src: src, seg: newSegmentation(src, quality), probs: defaultTokenProb}
+	e := &encoder{src: src, seg: newSegmentation(src, quality), probs: defaultTokenProb, i4Budget: i4HeaderBudget}
 	e.rec = &yuvPlanes{w: e.src.w, h: e.src.h, mbw: e.src.mbw, mbh: e.src.mbh, ys: e.src.ys, cs: e.src.cs,
 		y: make([]uint8, len(e.src.y)), u: make([]uint8, len(e.src.u)), v: make([]uint8, len(e.src.v))}
 	for n := range nSegments {
@@ -184,22 +206,61 @@ func (e *encoder) encodeRow(y int, done []chan struct{}, stats *tokenStats) {
 	}
 }
 
+// errTokenPartitionOverflow는 토큰을 8개 파티션으로 나눠도 한 파티션이 maxTokenPartSize를 넘는다는 뜻이다.
+var errTokenPartitionOverflow = errors.New("webpi: 토큰 파티션이 너무 큼")
+
 // bitstream은 확률을 정한 뒤 첫 파티션(헤더·모드)과 토큰 파티션을 써서 VP8 프레임을 만든다.
 // stats는 인코딩 중 모은, 건너뛰지 않는 매크로블록들의 토큰 통계다.
+// 토큰은 보통 파티션 하나에 담고, 한 파티션이 너무 크면 2·4·8개로 나눠 다시 쓴다 (libwebp도 같은 한도).
 func (e *encoder) bitstream(stats *tokenStats) ([]byte, error) {
-	e.chooseSkipProb()
-	hdr := newBoolEncoder()
-	e.writeHeader(hdr, stats)
-	e.writeModes(hdr)
-	first := hdr.finish()
-	if len(first) > maxFirstPartSize {
-		return nil, errors.New("webpi: 첫 파티션이 너무 큼")
-	}
-	tok := newBoolEncoder()
-	e.writeTokens(&tokenWriter{enc: tok, probs: &e.probs})
-	tokens := tok.finish()
+	return e.bitstreamFrom(stats, 0)
+}
 
-	out := make([]byte, 0, 10+len(first)+len(tokens))
+// bitstreamFrom은 bitstream과 같되 토큰 파티션 수를 2^minPartsLog2개부터 시도한다.
+func (e *encoder) bitstreamFrom(stats *tokenStats, minPartsLog2 int) ([]byte, error) {
+	e.chooseSkipProb()
+	// 헤더를 쓰면 토큰 확률이 갱신되므로 파티션 수를 바꿔 다시 쓸 때는 처음 확률에서 시작한다
+	baseProbs := e.probs
+	for partsLog2 := minPartsLog2; partsLog2 <= maxPartsLog2; partsLog2++ {
+		e.probs = baseProbs
+		hdr := newBoolEncoder()
+		e.writeHeader(hdr, stats, partsLog2)
+		e.writeModes(hdr)
+		first := hdr.finish()
+		if len(first) > maxFirstPartSize {
+			return nil, errFirstPartitionOverflow
+		}
+		if parts := e.tokenPartitions(1 << partsLog2); parts != nil {
+			return e.assembleFrame(first, parts), nil
+		}
+	}
+	return nil, errTokenPartitionOverflow
+}
+
+// tokenPartitions는 토큰을 n개 파티션에 나눠 쓴다 (매크로블록 행 y는 파티션 y mod n, RFC 6386 9.5).
+// 한 파티션이라도 maxTokenPartSize 이상이면 nil이다.
+func (e *encoder) tokenPartitions(n int) [][]byte {
+	ws := make([]*tokenWriter, n)
+	for i := range ws {
+		ws[i] = &tokenWriter{enc: newBoolEncoder(), probs: &e.probs}
+	}
+	e.writeTokens(ws)
+	parts := make([][]byte, n)
+	for i, w := range ws {
+		if parts[i] = w.enc.finish(); len(parts[i]) >= maxTokenPartSize {
+			return nil
+		}
+	}
+	return parts
+}
+
+// assembleFrame은 프레임 태그·시작 코드·크기, 첫 파티션, 토큰 파티션 크기 표(마지막 제외)와 파티션들을 잇는다.
+func (e *encoder) assembleFrame(first []byte, parts [][]byte) []byte {
+	size := 10 + len(first) + partSizeFieldSize*(len(parts)-1)
+	for _, p := range parts {
+		size += len(p)
+	}
+	out := make([]byte, 0, size)
 	// 프레임 태그: 키 프레임(0), 버전 0, show_frame 1, 첫 파티션 크기 19비트
 	tag := uint32(1<<4) | uint32(len(first))<<5
 	out = append(out, byte(tag), byte(tag>>8), byte(tag>>16))
@@ -207,7 +268,14 @@ func (e *encoder) bitstream(stats *tokenStats) ([]byte, error) {
 	out = binary.LittleEndian.AppendUint16(out, uint16(e.src.w))
 	out = binary.LittleEndian.AppendUint16(out, uint16(e.src.h))
 	out = append(out, first...)
-	return append(out, tokens...), nil
+	for _, p := range parts[:len(parts)-1] {
+		n := len(p)
+		out = append(out, byte(n), byte(n>>8), byte(n>>16))
+	}
+	for _, p := range parts {
+		out = append(out, p...)
+	}
+	return out
 }
 
 func (e *encoder) chooseSkipProb() {
@@ -222,16 +290,16 @@ func (e *encoder) chooseSkipProb() {
 }
 
 // writeHeader는 키 프레임 헤더 필드를 RFC 6386 9.2~9.11 순서로 쓴다.
-func (e *encoder) writeHeader(h *boolEncoder, stats *tokenStats) {
+func (e *encoder) writeHeader(h *boolEncoder, stats *tokenStats, partsLog2 int) {
 	h.putBit(uniformProb, false) // 색 공간
 	h.putBit(uniformProb, false) // 클램핑 필요
 	e.writeSegmentHeader(h)
 	h.putBit(uniformProb, false) // 일반(강한) 루프 필터
 	// 세그먼트가 절대값으로 덮어쓰므로 프레임 레벨은 형식상 값이다
 	h.putUint(uint32(e.seg.filter[0]), filterLevelBits)
-	h.putUint(0, 3)              // 선명도
-	h.putBit(uniformProb, false) // 모드/참조별 필터 델타 없음
-	h.putUint(0, 2)              // 토큰 파티션 1개
+	h.putUint(0, 3)                 // 선명도
+	h.putBit(uniformProb, false)    // 모드/참조별 필터 델타 없음
+	h.putUint(uint32(partsLog2), 2) // 토큰 파티션 수의 log2
 	// 세그먼트가 절대값으로 덮어쓰므로 기본 인덱스는 형식상 값이다
 	h.putUint(uint32(e.seg.quant[0].qi), qIndexBits)
 	for range 3 {

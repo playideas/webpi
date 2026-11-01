@@ -29,7 +29,8 @@ type yuvPlanes struct {
 	ys, cs   int // 휘도/색차 stride
 }
 
-func toYUV420(m image.Image) *yuvPlanes {
+// toYUV420은 m을 4:2:0 평면으로 바꾼다. alpha(행 우선, 없으면 nil)가 있으면 색차 평균을 알파로 가중한다.
+func toYUV420(m image.Image, alpha []uint8) *yuvPlanes {
 	b := m.Bounds()
 	p := &yuvPlanes{w: b.Dx(), h: b.Dy()}
 	p.mbw, p.mbh = (p.w+15)/16, (p.h+15)/16
@@ -50,9 +51,21 @@ func toYUV420(m image.Image) *yuvPlanes {
 			read(min(2*cy+k, p.h-1), rows[k])
 			lumaRow(p.y[(2*cy+k)*p.ys:(2*cy+k+1)*p.ys], rows[k])
 		}
-		chromaRow(p.u[cy*p.cs:(cy+1)*p.cs], p.v[cy*p.cs:(cy+1)*p.cs], rows)
+		u, v := p.u[cy*p.cs:(cy+1)*p.cs], p.v[cy*p.cs:(cy+1)*p.cs]
+		if alpha == nil {
+			chromaRow(u, v, rows)
+			return
+		}
+		arows := [2][]uint8{alphaRow(alpha, p.w, p.h, 2*cy), alphaRow(alpha, p.w, p.h, 2*cy+1)}
+		chromaRowAlpha(u, v, rows, &arows, p.w)
 	})
 	return p
+}
+
+// alphaRow는 알파 평면의 행 y다. 채움 영역의 행은 마지막 행을 쓴다.
+func alphaRow(alpha []uint8, w, h, y int) []uint8 {
+	y = min(y, h-1)
+	return alpha[y*w : (y+1)*w]
 }
 
 const rgbBytes = 3
@@ -72,11 +85,55 @@ func chromaRow(u, v []uint8, rows *[2][]uint8) {
 				s[c] += gammaToLinear[row[2*x*rgbBytes+c]] + gammaToLinear[row[(2*x+1)*rgbBytes+c]]
 			}
 		}
-		sr, sg, sb := linearToGamma(s[0]), linearToGamma(s[1]), linearToGamma(s[2])
-		u[x] = clipUV(uR*sr + uG*sg + uB*sb)
-		v[x] = clipUV(vR*sr + vG*sg + vB*sb)
+		putUV(u, v, x, &s)
 	}
 }
+
+// putUV는 선형 공간 네 값의 합(×4) s를 감마 공간으로 되돌려 색차 표본 x에 쓴다.
+func putUV(u, v []uint8, x int, s *[rgbBytes]int) {
+	sr, sg, sb := linearToGamma(s[0]), linearToGamma(s[1]), linearToGamma(s[2])
+	u[x] = clipUV(uR*sr + uG*sg + uB*sb)
+	v[x] = clipUV(vR*sr + vG*sg + vB*sb)
+}
+
+// chromaRowAlpha는 chromaRow와 같되 2×2 평균을 알파로 가중한다 — 투명 픽셀에 숨은 색이 보이는 이웃의
+// 색차로 번지지 않게 한다. 넷 다 불투명하거나 넷 다 투명하면 단순 평균이다. libwebp AccumulateRGBA와 같다.
+// 판단 PD-20261101-6d62647f: 알파가 있으면 색차 2×2 평균을 알파로 가중한다
+func chromaRowAlpha(u, v []uint8, rows *[2][]uint8, arows *[2][]uint8, w int) {
+	const allOpaque = 4 * opaqueAlpha
+	for x := range u {
+		// 채움 영역의 열은 마지막 픽셀의 알파를 쓴다 (RGB 행도 마지막 픽셀을 복제해 두었다)
+		xa, xb := min(2*x, w-1), min(2*x+1, w-1)
+		var s [rgbBytes]int
+		total := 0
+		for k, row := range rows {
+			aa, ab := int(arows[k][xa]), int(arows[k][xb])
+			total += aa + ab
+			for c := range rgbBytes {
+				s[c] += aa*gammaToLinear[row[2*x*rgbBytes+c]] + ab*gammaToLinear[row[(2*x+1)*rgbBytes+c]]
+			}
+		}
+		if total == 0 || total == allOpaque {
+			chromaRow(u[x:x+1], v[x:x+1], &[2][]uint8{rows[0][2*x*rgbBytes:], rows[1][2*x*rgbBytes:]})
+			continue
+		}
+		// 가중합을 알파 합으로 나눠 네 값의 합(×4) 척도로 맞춘다
+		for c := range s {
+			s[c] = s[c] * invAlphaSum[total] >> (invAlphaFix - 2)
+		}
+		putUV(u, v, x, &s)
+	}
+}
+
+// invAlphaSum[a]는 2^invAlphaFix / a다 (libwebp kInvAlpha) — 나눗셈을 곱셈으로 바꾼다.
+const invAlphaFix = 19
+
+var invAlphaSum = func() (t [4*opaqueAlpha + 1]int) {
+	for a := 1; a < len(t); a++ {
+		t[a] = (1 << invAlphaFix) / a
+	}
+	return t
+}()
 
 // 색차 2×2 평균은 감마를 푼 선형 공간에서 낸다 — 밝기 경계에서 평균이 어두운 쪽으로 쏠려
 // 색이 번지는 것을 줄인다. 상수와 고정소수점 처리는 libwebp picture_csp_enc.c와 같다.

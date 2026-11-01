@@ -128,8 +128,8 @@ func Test_cleanupTransparent_mixedBlocks_keepsVisiblePixels(t *testing.T) {
 			}
 		}
 	}
-	before := toYUV420(img)
-	after := toYUV420(img)
+	before := toYUV420(img, nil)
+	after := toYUV420(img, nil)
 	cleanupTransparent(after, alpha)
 	for y := range h {
 		for x := range w {
