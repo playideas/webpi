@@ -10,6 +10,8 @@ const (
 	lzPlaneCandidates = 16
 	// 한 번도 나오지 않은 기호의 추정 빈도 (0이면 비용이 무한대가 된다)
 	unseenSymbolCount = 0.5
+	// 최적 분할은 픽셀마다 12바이트 표를 쓰므로 이보다 큰 평면은 탐욕 분할만 한다 (16383² 평면이면 표만 3GB)
+	lzOptimalMaxPixels = 1 << 24
 )
 
 // matchFinder는 두 픽셀 해시 사슬과 2차원 거리 부호 표를 들고 일치를 찾는다.
@@ -108,12 +110,20 @@ func matchLength(argb []uint32, i, d int) int {
 func lz77(argb []uint32, w int) []lzToken {
 	f := newMatchFinder(argb, w)
 	toks := lzGreedy(f)
-	for range lzOptimalPasses {
+	for range optimalPasses(len(argb)) {
 		f.reset()
 		costs := newSymbolCosts(tokenHistograms(toks))
 		toks = lzOptimal(f, &costs)
 	}
 	return toks
+}
+
+// optimalPasses는 n픽셀 평면에 돌릴 최적 분할 횟수다. 큰 평면은 표 메모리 때문에 돌리지 않는다.
+func optimalPasses(n int) int {
+	if n > lzOptimalMaxPixels {
+		return 0
+	}
+	return lzOptimalPasses
 }
 
 // lzGreedy는 위치마다 가장 긴 일치(2차원 거리 → 해시 사슬 순, 같으면 먼저 찾은 것)를 고른다.

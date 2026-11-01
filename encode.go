@@ -42,7 +42,7 @@ type encoder struct {
 }
 
 // Encode는 m을 lossy WebP로 w에 쓴다. 알파가 있으면 VP8L 무손실로 압축해 함께 담는다.
-// 내부에서 난 패닉(작업 고루틴 포함)은 스택이 담긴 오류로 돌려준다.
+// 도중에 난 패닉(작업 고루틴, 넘겨받은 이미지의 At·w의 Write 포함)은 *PanicError로 돌려준다.
 // 판단 PD-20261030-51b0e794: 최소 골격(i16·고정 양자화)부터, 적응 양자화·RD 결정은 그 위에 얹는다
 func Encode(w io.Writer, m image.Image, o *Options) (err error) {
 	defer recoverToError(&err)
@@ -63,13 +63,7 @@ func Encode(w io.Writer, m image.Image, o *Options) (err error) {
 		return writeRIFF(w, riffChunk{fourccVP8, vp8})
 	}
 	// 알파 압축은 VP8 인코딩과 독립이라 동시에 돌린다
-	alph := make(chan alphaResult, 1)
-	go func() {
-		var r alphaResult
-		defer func() { alph <- r }()
-		defer recoverToError(&r.err)
-		r.data = encodeAlpha(alpha, b.Dx(), b.Dy())
-	}()
+	alph := startAlpha(func() []byte { return encodeAlpha(alpha, b.Dx(), b.Dy()) })
 	_, vp8, err := encodeFrame(m, alpha, quality)
 	a := <-alph
 	if err != nil {
@@ -85,6 +79,19 @@ func Encode(w io.Writer, m image.Image, o *Options) (err error) {
 type alphaResult struct {
 	data []byte
 	err  error
+}
+
+// startAlpha는 encode를 고루틴에서 돌리고 결과 하나가 들어올 채널을 돌려준다. 패닉은 오류로 담긴다.
+// 채널은 버퍼가 있어 받는 쪽이 먼저 끝나도 고루틴이 남지 않는다.
+func startAlpha(encode func() []byte) <-chan alphaResult {
+	alph := make(chan alphaResult, 1)
+	go func() {
+		var r alphaResult
+		defer func() { alph <- r }()
+		defer recoverToError(&r.err)
+		r.data = encode()
+	}()
+	return alph
 }
 
 // encodeFrame은 VP8 프레임을 만들고, 검증용으로 인코더 상태(복원 평면 포함)도 돌려준다.

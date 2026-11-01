@@ -187,6 +187,12 @@ func writePrefixCode(w *bitWriter, counts []uint32) prefixCode {
 	if len(syms) <= simpleCodeMaxSymbols && (len(syms) == 0 || syms[len(syms)-1] < simpleSymbolLimit) {
 		return writeSimpleCode(w, syms, len(counts))
 	}
+	if len(syms) == 1 {
+		// 단순 부호로 못 쓰는 기호(256 이상) 하나뿐이면, 길이 1인 부호를 디코더는 0비트로 읽는다 —
+		// 쓰이지 않는 기호 0을 하나 더 둬 두 기호 모두 1비트인 모호하지 않은 부호로 만든다
+		counts = slices.Clone(counts)
+		counts[0]++
+	}
 	lengths := huffmanLengths(counts, maxCodeLength)
 	writeCodeLengths(w, lengths)
 	return prefixCode{lengths, canonicalCodes(lengths)}
