@@ -1,11 +1,115 @@
 # webpi
 
 cgo 없는 Go lossy WebP 인코더. 목표는 **libwebp와 같은 압축 효율**이다.
-arm64에서는 NEON 어셈블리 커널을 기본으로 쓰고, `go build -tags purego`면 모든 아키텍처에서 순수 Go로 빌드된다.
-두 빌드의 출력은 바이트 단위로 같다.
-알파 채널은 libwebp처럼 VP8L 무손실로 압축해 함께 담는다.
 
-## 왜 만드나
+- 같은 화질에서 크기가 libwebp와 거의 같다 (휘도 SSIM 기준 +2.4%, RGB PSNR 기준 −1.4%). 기존 순수 Go 인코더는 +14~22%
+- arm64에서는 NEON 어셈블리 커널을 기본으로 쓴다. `-tags purego`면 모든 아키텍처에서 순수 Go로 빌드되고, 두 빌드의 출력은 바이트 단위로 같다
+- 알파 채널은 libwebp처럼 VP8L 무손실로 압축해 함께 담는다
+- 출력은 libwebp `dwebp`(브라우저와 같은 디코더)로 디코딩해 검증한다
+
+## 설치
+
+```sh
+go get github.com/playideas/webpi@latest
+```
+
+Go 1.25 이상. 외부 의존이 없다.
+
+## 사용
+
+```go
+package main
+
+import (
+	"image"
+	_ "image/jpeg"
+	_ "image/png"
+	"log"
+	"os"
+
+	"github.com/playideas/webpi"
+)
+
+func main() {
+	in, err := os.Open("in.png")
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer in.Close()
+	img, _, err := image.Decode(in)
+	if err != nil {
+		log.Fatal(err)
+	}
+	out, err := os.Create("out.webp")
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer out.Close()
+	if err := webpi.Encode(out, img, &webpi.Options{Quality: 80}); err != nil {
+		log.Fatal(err)
+	}
+}
+```
+
+- `Quality`는 0~100이고 cwebp `-q`와 같은 곡선을 쓴다. `Options`가 `nil`이면 75다 (`&webpi.Options{}`는 품질 0이다)
+- 어떤 `image.Image`든 받는다. `*image.YCbCr`(JPEG), `*image.NRGBA`, `*image.RGBA`는 픽셀을 직접 읽어 빠르다
+- 투명 픽셀이 하나라도 있으면 알파를 담은 확장 형식(`VP8X` + `ALPH` + `VP8 `)으로, 모두 불투명하면 단순 형식(`VP8 ` 청크 하나)으로 쓴다
+- `Encode`는 동시에 여러 고루틴에서 불러도 안전하고, 한 장도 매크로블록 행 단위로 여러 코어에 나눠 인코딩한다.
+  출력은 코어 수와 상관없이 같다
+
+### 지원하지 않는 것
+
+- 색의 무손실(VP8L) 인코딩 — 무손실 압축은 알파 평면에만 쓴다
+- 애니메이션, ICC·EXIF·XMP 메타데이터
+- 디코딩 — `golang.org/x/image/webp`를 쓰면 된다
+- 품질 외의 세부 옵션 (method, segments, sns 등은 libwebp `-m 4` 기본값에 맞춰 고정)
+- 투명한 픽셀의 색 보존 — libwebp 기본 동작처럼 보이지 않는 픽셀의 색은 평탄하게 바꾼다 (cwebp `-exact`에 해당하는 옵션 없음)
+
+## 빌드
+
+| 대상 | 명령 | 커널 |
+|---|---|---|
+| arm64 (기본) | `go build` | NEON 어셈블리 |
+| arm64, 순수 Go | `go build -tags purego` | Go |
+| 그 밖의 아키텍처 | `go build` | Go |
+
+cgo를 쓰지 않으므로 `CGO_ENABLED=0`으로 linux·windows·darwin 어디로든 크로스 컴파일된다.
+
+## 성능
+
+COCO val2017 사진, 0.75배 축소, JPEG q85와 같은 화질에서 libwebp 1.6.0(`cwebp -m 4`) 대비 크기 차:
+
+| 인코더 | 휘도 SSIM | 색차 SSIM | YUV PSNR | RGB PSNR |
+|---|---|---|---|---|
+| **webpi** | **+2.4%** | **−9.8%** | **+1.0%** | **−1.4%** |
+| deepteams/webp (순수 Go, 기본값) | +14.1% | −8.9% | +6.5% | +3.8% |
+
+640×480 사진 한 장, q75 인코딩 시간 (Apple M4 Max):
+
+| | webpi arm64 NEON | webpi 순수 Go | deepteams/webp |
+|---|---|---|---|
+| 코어 하나 | ~25.8ms | ~41.7ms | ~47.3ms |
+| 모든 코어 동시(처리량) | ~2.1ms | ~3.3ms | ~3.4ms |
+
+알파: DIS5K 컷아웃 12장(장당 약 1000만 픽셀)에서 ALPH 청크 크기가 libwebp의 1.006~1.011배다.
+
+측정 방법과 단계별 기록은 아래 [개발 기록](#개발-기록)에 있다.
+
+## 테스트
+
+```sh
+go test ./...                  # 기본 빌드
+go test -tags purego ./...     # 순수 Go 빌드
+cd bench && go test ./...      # 디코더 왕복(x/image/webp, dwebp)
+```
+
+PATH에 libwebp의 `dwebp`가 있으면 libwebp 디코더 대조도 같이 돈다:
+- VP8: dwebp의 필터 없는 YUV 출력이 인코더의 복원 평면과 비트 단위로 같다
+- 알파: 두 디코더 모두에서 원본과 정확히 같다
+
+## 개발 기록
+
+### 왜 만들었나
 
 cgo 없이 크로스 컴파일해야 하는 단일 바이너리 서버에서는 libwebp를 쓸 수 없다.
 기존 순수 Go 인코더를 재 보니 (2026-10-31):
@@ -19,31 +123,25 @@ JPEG q85와 같은 화질(휘도 SSIM 0.9705)에서의 크기 — COCO val2017 9
 | deepteams/webp v1.2.8 (순수 Go) | 약 32.1KB | −16% |
 | linzeyan/webp-go v0.1.2 (순수 Go) | 약 53KB | +39% |
 
-순수 Go 최선(deepteams)과 libwebp 사이에 약 21%의 격차가 있다. **이 격차를 없애는 것이 webpi의 존재 이유다.**
+순수 Go 최선(deepteams)과 libwebp 사이에 약 21%의 격차가 있었고, 이 격차를 없애려고 만들었다. 처음에 정한 합격 기준과 현재 상태:
 
-## 합격 기준 (게시 조건)
+| 기준 | 상태 |
+|---|---|
+| 같은 SSIM에서 크기가 libwebp 대비 +5% 이내 | 충족 (+2.4%) |
+| libwebp `dwebp`로 디코딩 가능 | 충족 (비트 단위 대조 테스트) |
+| cgo 없음, 외부 의존 최소, `CGO_ENABLED=0`으로 linux·windows·darwin 빌드 | 충족 (외부 의존 없음) |
+| 인코딩 속도가 deepteams와 같은 자릿수 | 충족 (더 빠름) |
 
-1. 같은 SSIM에서 크기가 libwebp 대비 +5% 이내 (deepteams는 +21%)
-2. 출력은 libwebp `dwebp`로 디코딩 가능해야 한다 (브라우저와 같은 디코더)
-3. cgo 없음, 외부 의존 최소, `CGO_ENABLED=0`으로 linux/windows/darwin 빌드
-4. 인코딩 속도는 deepteams와 같은 자릿수
-
-## 측정 방법과 이미 밟은 함정
+### 측정 방법과 이미 밟은 함정
 
 - 하네스: `bench/` (품질 스윕 → 같은 SSIM에서 크기 보간)
 - **원본이 JPEG면 축소 없이 재압축하지 말 것** — 8×8 격자가 맞아 JPEG가 부당하게 유리해진다
 - **WebP는 dwebp로 디코딩할 것** — x/image/webp는 크로마 업샘플링이 달라 SSIM이 0.989만큼 어긋나 WebP 점수가 깎였다
-- 휘도 SSIM 하나만 재 왔다. 큰 이미지(2048px)와 다른 지표(예: 크로마 포함, butteraugli 계열)로도 확인할 것
+- 처음에는 휘도 SSIM 하나만 쟀다. 지금은 지표 넷으로 잰다 ([다중 지표 검증](#다중-지표-검증-2026-10-31))
 
-## 참고
+### 기준선과 격차 분해 (2026-10-31, `bench/`)
 
-- VP8 비트스트림: RFC 6386. 컨테이너: Google WebP Container Specification
-- 일부 절차와 상수(분석·세그먼트, 양자화 바이어스, 레벨 비용 표, RD 가중치 등)는 libwebp를 따랐다.
-  libwebp의 BSD-3 고지는 [THIRD_PARTY_NOTICES](THIRD_PARTY_NOTICES)에 있다
-
-## 기준선과 격차 분해 (2026-10-31, `bench/`)
-
-COCO val2017 150장(`~/datasets/coco_val/images`), 0.75배 축소. 목표 SSIM 0.9728(JPEG q85)에서 잰 크기:
+COCO val2017 150장, 0.75배 축소. 목표 SSIM 0.9728(JPEG q85)에서 잰 크기:
 libwebp 27.79KB, deepteams 34.00KB(**+22.3%**), JPEG 39.09KB. 원 측정의 +21%가 재현됐다.
 원본: `bench/results/baseline.txt`
 
@@ -68,7 +166,7 @@ libwebp 기능을 하나씩 끄거나 바꿔 잰 결과(libwebp 기본 `-m 4` �
 
 실행: `cd bench && go run . -dir <jpg 디렉터리> [-codecs libwebp,deepteams,deepteams-zero,webpi] [-variants "이름=cwebp 인자;..."]`
 
-## 진행 기록
+### 진행 기록
 
 | 단계 | ssim 0.9728 크기 | vs libwebp | 원본 |
 |---|---|---|---|
@@ -78,7 +176,7 @@ libwebp 기능을 하나씩 끄거나 바꿔 잰 결과(libwebp 기본 `-m 4` �
 
 모든 단계에서 dwebp `-nofilter -yuv` 결과가 인코더의 복원 평면과 비트 단위로 같다 (`Test_encodeFrame_dwebpUnfilteredYUV_matchesReconstructionExactly`).
 
-### 다중 지표 검증 (2026-10-31)
+#### 다중 지표 검증 (2026-10-31)
 
 휘도 SSIM 하나로는 색차를 굶기는 인코더를 가려낼 수 없어서 지표를 넷으로 늘렸다:
 휘도 SSIM, 색차(Cb·Cr) SSIM, (6·Y+Cb+Cr)/8 가중 PSNR, RGB PSNR.
@@ -104,7 +202,7 @@ webpi가 두 deepteams 설정 모두를 네 지표·두 측정 방식 전부에�
   휘도 지표를 ~2% 내주고 색차 SSIM ~6%, RGB PSNR ~1%를 얻는다 (스윕 비교 후 선택)
 - 시도했지만 뺀 것: libwebp 주파수 샤프닝(모든 지표 악화), 2패스 확률(휘도 0.4% 이득에 시간 2배)
 
-### 속도
+#### 속도
 
 | | 시작 | 순수 Go (`-tags purego`) | arm64 NEON (기본) | deepteams 기본값 |
 |---|---|---|---|---|
@@ -130,7 +228,7 @@ webpi가 두 deepteams 설정 모두를 네 지표·두 측정 방식 전부에�
   `kernels_arm64.s`를 만든다(생성 파일을 커밋하므로 빌드에는 clang이 필요 없다). Go 구현과의 비트 일치는
   `go test ./...`의 무작위 대조 테스트로 확인한다. deepteams는 arm64에서 예측·SSE·역 DCT가 NEON 어셈블리다
 
-### 알파 채널 (2026-11-01)
+#### 알파 채널 (2026-11-01)
 
 알파가 있으면 `VP8X` → `ALPH`(VP8L 무손실) → `VP8 ` 순서로 쓴다. 모두 불투명이면 지금처럼 `VP8 ` 청크 하나다.
 
@@ -151,7 +249,14 @@ DIS5K 12장(사진 + 전경 마스크로 만든 컷아웃, 장당 약 1000만 �
 
 12장 인코딩(VP8 포함)에 약 1초가 걸린다. 알파는 무손실이라 x/image/webp와 dwebp 둘 다에서 원본과 정확히 같은지
 `bench/alpha_test.go`로 확인한다. 묶지 않은 원본을 2차원 거리로 복사하면 일부 이진 마스크에서 ALPH가 10% 더
-작았지만 픽셀이 8배라 시간이 몇 배 들어 쓰지 않았다
+작았지만 픽셀이 8배라 시간이 몇 배 들어 쓰지 않았다.
+파일 전체 크기는 두 인코더의 q75가 같은 화질이 아니라 참고용이다
+
+## 참고
+
+- VP8 비트스트림: RFC 6386. 컨테이너와 VP8L: Google WebP Container Specification, WebP Lossless Bitstream Format
+- 일부 절차와 상수(분석·세그먼트, 양자화 바이어스, 레벨 비용 표, RD 가중치, 투명 영역 정리 등)는 libwebp를 따랐다.
+  libwebp의 BSD-3 고지는 [THIRD_PARTY_NOTICES](THIRD_PARTY_NOTICES)에 있다
 
 ## 라이선스
 
