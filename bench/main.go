@@ -16,6 +16,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -26,11 +27,9 @@ import (
 // 품질 설정 스윕 — 변형마다 기준 SSIM을 감싸는 곡선이 필요해 넓게 잡는다
 var qualities = []int{40, 50, 60, 70, 75, 80, 85, 90, 95}
 
-// 기준 SSIM을 정하는 JPEG 품질 — 비교 기준으로 삼은 JPEG 설정
-const refJPEGQuality = 85
-
 type options struct {
 	dir, codecs, variants string
+	qualities, ref        string
 	scale, target         float64
 	jobs                  int
 }
@@ -42,7 +41,10 @@ func main() {
 	flag.Float64Var(&o.scale, "scale", 0.75, "인코딩 전 축소 비율 (1이면 축소 안 함)")
 	flag.StringVar(&o.codecs, "codecs", "jpeg,libwebp,deepteams", "기본 코덱 (jpeg,libwebp,deepteams,deepteams-zero,linzeyan,webpi)")
 	flag.StringVar(&o.variants, "variants", "", `libwebp 변형 "이름=cwebp 인자;..." 예: "sns0=-sns 0;seg1=-segments 1"`)
-	flag.Float64Var(&o.target, "target", 0, "휘도 SSIM 기준값 (0이면 JPEG q85의 값) — 다른 지표는 항상 JPEG q85 기준")
+	flag.Float64Var(&o.target, "target", 0, "휘도 SSIM 기준값 (0이면 -ref의 값) — 다른 지표는 항상 -ref 기준")
+	flag.StringVar(&o.qualities, "q", "", "스윕할 품질 목록 (쉼표 구분, 비우면 기본 목록)")
+	// 높은 품질 구간을 볼 때는 예: -ref libwebp:95 (libwebp q95와 같은 화질에서의 크기)
+	flag.StringVar(&o.ref, "ref", "jpeg:85", "지표 기준값을 정하는 코덱:품질 (쉼표로 여러 개)")
 	// 병렬이면 인코딩 시간이 서로 간섭한다 — 속도를 볼 때는 -j 1
 	flag.IntVar(&o.jobs, "j", runtime.NumCPU(), "동시 처리 이미지 수")
 	flag.Parse()
@@ -61,29 +63,100 @@ func run(o options) error {
 	if err != nil {
 		return err
 	}
-	fmt.Printf("images=%d scale=%.2f jobs=%d\n", len(imgs), o.scale, o.jobs)
-	ref, err := measure(builtinCodecs()["jpeg"], imgs, refJPEGQuality, o.jobs)
+	fmt.Printf("images=%d scale=%.2f jobs=%d ref=%s\n", len(imgs), o.scale, o.jobs, o.ref)
+	qs, err := parseQualities(o.qualities)
 	if err != nil {
 		return err
 	}
-	targets := ref.m
-	if o.target != 0 {
-		targets[metricSSIMY] = o.target
+	refs, err := parseRefs(o.ref)
+	if err != nil {
+		return err
 	}
-	fmt.Printf("targets %s\n", formatMetrics(targets))
+	targets, err := refTargets(refs, imgs, o)
+	if err != nil {
+		return err
+	}
+	curves, err := sweep(cs, imgs, qs, o.jobs)
+	if err != nil {
+		return err
+	}
+	for i, t := range targets {
+		fmt.Printf("\n## 기준 %s: %s\n", refs[i].label, formatMetrics(t))
+		printSummary(cs, curves, t)
+	}
+	printBDRates(cs, curves)
+	return nil
+}
+
+// refPoint는 지표 기준값을 정하는 코덱과 품질이다.
+type refPoint struct {
+	label string
+	c     codec
+	q     int
+}
+
+// refTargets는 기준마다 지표 값을 잰다. -target이 있으면 휘도 SSIM만 그 값으로 바꾼다.
+func refTargets(refs []refPoint, imgs []*image.RGBA, o options) ([][nMetrics]float64, error) {
+	var out [][nMetrics]float64
+	for _, r := range refs {
+		p, err := measure(r.c, imgs, r.q, o.jobs)
+		if err != nil {
+			return nil, err
+		}
+		if o.target != 0 {
+			p.m[metricSSIMY] = o.target
+		}
+		out = append(out, p.m)
+	}
+	return out, nil
+}
+
+// sweep은 코덱마다 품질 목록을 돌며 곡선을 잰다.
+func sweep(cs []codec, imgs []*image.RGBA, qs []int, jobs int) (map[string][]point, error) {
 	curves := map[string][]point{}
 	for _, c := range cs {
-		for _, q := range qualities {
-			p, err := measure(c, imgs, q, o.jobs)
+		for _, q := range qs {
+			p, err := measure(c, imgs, q, jobs)
 			if err != nil {
-				return fmt.Errorf("%s q%d: %w", c.name, q, err)
+				return nil, fmt.Errorf("%s q%d: %w", c.name, q, err)
 			}
 			curves[c.name] = append(curves[c.name], p)
 			fmt.Printf("%-14s q=%d  avgKB=%7.2f  %s  encMs=%6.1f\n", c.name, q, p.bytes/1024, formatMetrics(p.m), p.encMs)
 		}
 	}
-	printSummary(cs, curves, targets)
-	return nil
+	return curves, nil
+}
+
+// parseQualities는 쉼표로 구분한 품질 목록을 읽는다. 비어 있으면 기본 목록이다.
+func parseQualities(list string) ([]int, error) {
+	if list == "" {
+		return qualities, nil
+	}
+	var qs []int
+	for _, f := range strings.Split(list, ",") {
+		q, err := strconv.Atoi(strings.TrimSpace(f))
+		if err != nil {
+			return nil, fmt.Errorf("품질 %q: %w", f, err)
+		}
+		qs = append(qs, q)
+	}
+	return qs, nil
+}
+
+// parseRefs는 쉼표로 구분한 "코덱:품질" 기준 목록을 읽는다.
+func parseRefs(list string) ([]refPoint, error) {
+	var refs []refPoint
+	for _, ref := range strings.Split(list, ",") {
+		ref = strings.TrimSpace(ref)
+		name, qs, ok := strings.Cut(ref, ":")
+		c, known := builtinCodecs()[name]
+		q, err := strconv.Atoi(qs)
+		if !ok || !known || err != nil {
+			return nil, fmt.Errorf("기준 %q는 코덱:품질 형식이어야 한다", ref)
+		}
+		refs = append(refs, refPoint{ref, c, q})
+	}
+	return refs, nil
 }
 
 func selectCodecs(names, variants string) ([]codec, error) {
@@ -119,7 +192,6 @@ func printSummary(cs []codec, curves map[string][]point, targets [nMetrics]float
 		}
 		fmt.Println()
 	}
-	printBDRates(cs, curves)
 }
 
 // printBDRates는 겹치는 품질 구간 전체의 평균 크기 차이(BD-rate)를 libwebp 대비로 낸다.

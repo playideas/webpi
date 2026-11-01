@@ -20,6 +20,12 @@ const (
 	// 질감 많은 세그먼트에서 지나치게 깎인다. COCO 150장에서 −3이 휘도 지표를 ~2% 내주고
 	// 색차 SSIM을 ~6%, RGB PSNR을 ~1% 얻는 균형점이었다 (−2·−4, DC 이동과 비교, bench/results 참조)
 	uvACBias = -3
+	// 높은 품질에서는 편향을 0(libwebp)으로 줄인다. 색차 SSIM이 포화(두 인코더 모두 q96부터 0.964)해
+	// 색차에 더 쓴 비트가 휘도 손해로만 남았다. 품질 uvBiasZeroQuality부터 0이고, 그 아래로 품질
+	// uvBiasStepWidth마다 한 단계씩 커져 q75 이하는 uvACBias다. libwebp q90·q95 화질에서 휘도 SSIM 기준
+	// +6%였던 격차가 +2.0%·+0.8%로 준다 (q95에서 −1은 색차 이득 없이 휘도만 +2.3%, bench/results/webpi-highq.txt)
+	uvBiasZeroQuality = 95
+	uvBiasStepWidth   = 10
 )
 
 // 루프 필터 세기 — libwebp filter_enc.c SetupFilterStrength (cwebp 기본 -f 60, 선명도 0)
@@ -51,7 +57,7 @@ func newSegmentation(src *yuvPlanes, quality float32) segmentation {
 	ids, segAlpha, segBeta := assignSegments(alphas)
 	s := segmentation{ids: ids}
 	s.dqUVAC = (uvAlpha - midUVAlpha) * (maxDQUV - minDQUV) / (maxUVAlpha - minUVAlpha)
-	s.dqUVAC = min(max(s.dqUVAC*snsStrength/percent, minDQUV), maxDQUV) + uvACBias
+	s.dqUVAC = min(max(s.dqUVAC*snsStrength/percent, minDQUV), maxDQUV) + uvACBiasAt(quality)
 	s.dqUVDC = uvDCBoost * snsStrength / percent
 	cBase := qualityToCompression(quality)
 	amp := snsToDQ * snsStrength / percent / (maxSegAlpha + 1)
@@ -62,6 +68,16 @@ func newSegmentation(src *yuvPlanes, quality float32) segmentation {
 	}
 	s.probs = segmentProbs(ids)
 	return s
+}
+
+// uvACBiasAt은 품질 quality에서의 색차 AC 편향이다: q95 이상 0, q85 초과 −1, q75 초과 −2, 그 아래 uvACBias.
+// 판단 PD-20261101-853f635a: 색차 AC 편향은 높은 품질로 갈수록 libwebp 설정으로 줄인다
+func uvACBiasAt(quality float32) int {
+	if quality >= uvBiasZeroQuality {
+		return 0
+	}
+	steps := int(math.Floor(float64(uvBiasZeroQuality-quality)/uvBiasStepWidth)) + 1
+	return -min(steps, -uvACBias)
 }
 
 // filterLevel은 양자화가 거칠수록(경계 계단이 클수록) 세게, 평탄한 세그먼트일수록 약하게 거른다.
