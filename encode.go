@@ -42,8 +42,10 @@ type encoder struct {
 }
 
 // Encode는 m을 lossy WebP로 w에 쓴다. 알파가 있으면 VP8L 무손실로 압축해 함께 담는다.
+// 내부에서 난 패닉(작업 고루틴 포함)은 스택이 담긴 오류로 돌려준다.
 // 판단 PD-20261030-51b0e794: 최소 골격(i16·고정 양자화)부터, 적응 양자화·RD 결정은 그 위에 얹는다
-func Encode(w io.Writer, m image.Image, o *Options) error {
+func Encode(w io.Writer, m image.Image, o *Options) (err error) {
+	defer recoverToError(&err)
 	b := m.Bounds()
 	if b.Dx() <= 0 || b.Dy() <= 0 || b.Dx() > maxDimension || b.Dy() > maxDimension {
 		return fmt.Errorf("webpi: 지원하지 않는 크기 %dx%d", b.Dx(), b.Dy())
@@ -61,14 +63,28 @@ func Encode(w io.Writer, m image.Image, o *Options) error {
 		return writeRIFF(w, riffChunk{fourccVP8, vp8})
 	}
 	// 알파 압축은 VP8 인코딩과 독립이라 동시에 돌린다
-	alph := make(chan []byte, 1)
-	go func() { alph <- encodeAlpha(alpha, b.Dx(), b.Dy()) }()
+	alph := make(chan alphaResult, 1)
+	go func() {
+		var r alphaResult
+		defer func() { alph <- r }()
+		defer recoverToError(&r.err)
+		r.data = encodeAlpha(alpha, b.Dx(), b.Dy())
+	}()
 	_, vp8, err := encodeFrame(m, alpha, quality)
 	a := <-alph
 	if err != nil {
 		return err
 	}
-	return writeRIFF(w, riffChunk{fourccVP8X, vp8xHeader(b.Dx(), b.Dy())}, riffChunk{fourccALPH, a}, riffChunk{fourccVP8, vp8})
+	if a.err != nil {
+		return a.err
+	}
+	return writeRIFF(w, riffChunk{fourccVP8X, vp8xHeader(b.Dx(), b.Dy())}, riffChunk{fourccALPH, a.data}, riffChunk{fourccVP8, vp8})
+}
+
+// alphaResult는 알파 고루틴이 돌려주는 ALPH 본문 또는 패닉 오류다.
+type alphaResult struct {
+	data []byte
+	err  error
 }
 
 // encodeFrame은 VP8 프레임을 만들고, 검증용으로 인코더 상태(복원 평면 포함)도 돌려준다.
@@ -78,6 +94,14 @@ func encodeFrame(m image.Image, alpha []uint8, quality float32) (*encoder, []byt
 	if alpha != nil {
 		cleanupTransparent(src, alpha)
 	}
+	e := newEncoder(src, quality)
+	stats := e.encodeRows()
+	vp8, err := e.bitstream(stats)
+	return e, vp8, err
+}
+
+// newEncoder는 원본 평면과 품질로 세그먼트·λ·버퍼를 준비한 인코더를 만든다.
+func newEncoder(src *yuvPlanes, quality float32) *encoder {
 	e := &encoder{src: src, seg: newSegmentation(src, quality), probs: defaultTokenProb}
 	e.rec = &yuvPlanes{w: e.src.w, h: e.src.h, mbw: e.src.mbw, mbh: e.src.mbh, ys: e.src.ys, cs: e.src.cs,
 		y: make([]uint8, len(e.src.y)), u: make([]uint8, len(e.src.u)), v: make([]uint8, len(e.src.v))}
@@ -87,9 +111,7 @@ func encodeFrame(m image.Image, alpha []uint8, quality float32) (*encoder, []byt
 	e.costs = defaultLevelCosts()
 	e.nzTop, e.modeTop = make([]nzContext, src.mbw), make([]uint8, src.mbw*4)
 	e.mbs, e.coefs = make([]mbHeader, src.mbw*src.mbh), make([][]int16, src.mbh)
-	stats := e.encodeRows()
-	vp8, err := e.bitstream(stats)
-	return e, vp8, err
+	return e
 }
 
 // 행 r의 매크로블록 x는 윗행이 x+1까지 끝나야 시작할 수 있다 — i4의 오른쪽 위 픽셀이 윗행 x+1에 있다.
@@ -137,6 +159,13 @@ func (e *encoder) encodeRow(y int, done []chan struct{}, stats *tokenStats) {
 	e.coefs[y] = make([]int16, 0, mbw*coefsPerMBHint)
 	r := &rowCoder{encoder: e, modes: modeContext{top: e.modeTop}, stats: stats, coefs: &e.coefs[y]}
 	above := 0 // 윗행에서 끝났다고 확인한 매크로블록 수
+	sent := 0  // 아랫행에 알린 매크로블록 수
+	// 패닉으로 행이 중간에 끝나도 아랫행이 영원히 기다리지 않게 남은 토큰을 채운다
+	defer func() {
+		for ; sent < mbw; sent++ {
+			done[y] <- struct{}{}
+		}
+	}()
 	for x := range mbw {
 		for y > 0 && above < min(x+wavefrontLag, mbw) {
 			<-done[y-1]
@@ -144,6 +173,7 @@ func (e *encoder) encodeRow(y int, done []chan struct{}, stats *tokenStats) {
 		}
 		r.encodeMB(x, y, &e.mbs[y*mbw+x])
 		done[y] <- struct{}{}
+		sent++
 	}
 }
 

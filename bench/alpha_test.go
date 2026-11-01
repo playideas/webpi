@@ -75,15 +75,31 @@ func Test_Encode_alphaImages_decodeToExactAlpha(t *testing.T) {
 		for _, sz := range alphaTestSizes {
 			t.Run(fmt.Sprintf("%s_%dx%d", p.name, sz[0], sz[1]), func(t *testing.T) {
 				nrgba := makeAlphaImage(p, sz[0], sz[1], r)
-				// 알파가 곱해진 RGBA로도 넣어 본다 — 알파 값은 같아야 한다
-				rgba := image.NewRGBA(nrgba.Bounds())
-				draw.Draw(rgba, rgba.Bounds(), nrgba, image.Point{}, draw.Src)
-				for _, img := range []image.Image{nrgba, rgba} {
+				for _, img := range alphaInputs(nrgba) {
 					checkAlphaRoundTrip(t, img, dwebpErr == nil)
 				}
 			})
 		}
 	}
+}
+
+// alphaInputs는 같은 알파를 여러 이미지 타입으로 만든다. Pix를 직접 읽는 NRGBA·RGBA(알파가 곱해진 색)와,
+// At으로 읽는 일반 경로인 NRGBA64·Paletted(투명색이 있는 PNG를 디코딩하면 나오는 타입)다.
+func alphaInputs(nrgba *image.NRGBA) []image.Image {
+	b := nrgba.Bounds()
+	rgba, n64 := image.NewRGBA(b), image.NewNRGBA64(b)
+	draw.Draw(rgba, b, nrgba, image.Point{}, draw.Src)
+	draw.Draw(n64, b, nrgba, image.Point{}, draw.Src)
+	// 팔레트 항목 v는 알파 v — 픽셀의 알파 값을 그대로 인덱스로 쓴다
+	pal := make(color.Palette, 256)
+	for v := range pal {
+		pal[v] = color.NRGBA{uint8(v), 255 - uint8(v), 77, uint8(v)}
+	}
+	paletted := image.NewPaletted(b, pal)
+	for i := range paletted.Pix {
+		paletted.Pix[i] = nrgba.Pix[4*i+3]
+	}
+	return []image.Image{nrgba, rgba, n64, paletted}
 }
 
 func checkAlphaRoundTrip(t *testing.T, img image.Image, useDwebp bool) {
