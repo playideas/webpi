@@ -29,6 +29,8 @@ const (
 	maxBundledPalette = 16
 	// ARGB에서 알파 값을 담는 초록 채널의 위치
 	greenShift = 8
+	// color.Color.RGBA()의 16비트 값을 8비트로 줄이는 이동량
+	color16To8Shift = 8
 )
 
 // alphaPlane은 m의 알파 값을 행 우선으로 돌려준다. 모두 불투명이면 nil이다.
@@ -48,7 +50,7 @@ func alphaPlane(m image.Image) []uint8 {
 		for y := range h {
 			for x := range w {
 				_, _, _, a := m.At(b.Min.X+x, b.Min.Y+y).RGBA()
-				out[y*w+x] = uint8(a >> greenShift)
+				out[y*w+x] = uint8(a >> color16To8Shift)
 			}
 		}
 	}
