@@ -1,3 +1,3 @@
-module github.com/playidea-lab/webpi
+module github.com/playideas/webpi
 
 go 1.25

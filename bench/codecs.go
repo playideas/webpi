@@ -14,7 +14,7 @@ import (
 	deepteams "github.com/deepteams/webp"
 	linzeyan "github.com/linzeyan/webp-go"
 
-	"github.com/playidea-lab/webpi"
+	"github.com/playideas/webpi"
 )
 
 // 인코딩 노력 수준: 비교 대상 WebP 인코더 모두 기본값 4

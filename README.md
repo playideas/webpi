@@ -127,3 +127,7 @@ webpi가 두 deepteams 설정 모두를 네 지표·두 측정 방식 전부에�
   Go 어셈블러에 정수 NEON 명령이 없어 `internal/asmgen/gen.py`가 clang으로 어셈블한 기계어를 `WORD`로 넣은
   `kernels_arm64.s`를 만든다(생성 파일을 커밋하므로 빌드에는 clang이 필요 없다). Go 구현과의 비트 일치는
   `go test ./...`의 무작위 대조 테스트로 확인한다. deepteams는 arm64에서 예측·SSE·역 DCT가 NEON 어셈블리다
+
+## 라이선스
+
+MIT — [LICENSE](LICENSE)
