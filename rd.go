@@ -84,15 +84,14 @@ func (m *quantMatrix) expn() int64 {
 
 // isFlat는 블록들의 0 아닌 AC 레벨 수가 limit 이하인지 본다.
 func isFlat(levels [][16]int16, limit int) bool {
+	// 블록 안에서는 분기 없이 센다 — 0 여부가 무작위라 조기 종료 분기는 예측이 자주 빗나간다
 	n := 0
 	for b := range levels {
 		for _, l := range levels[b][1:] {
-			if l != 0 {
-				n++
-				if n > limit {
-					return false
-				}
-			}
+			n += int(b2i(l != 0))
+		}
+		if n > limit {
+			return false
 		}
 	}
 	return true
