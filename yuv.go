@@ -127,6 +127,10 @@ func rgbRowReader(m image.Image) func(y int, dst []uint8) {
 	}
 	switch img := m.(type) {
 	case *image.RGBA:
+		if !img.Opaque() {
+			// 알파가 곱해진 색이라 반투명 픽셀은 나눠서 되돌린다 — WebP는 곱하지 않은 색을 담는다
+			return func(y int, dst []uint8) { copyRGBUnpremultiplied(dst, img.Pix[img.PixOffset(b.Min.X, b.Min.Y+y):], w) }
+		}
 		return func(y int, dst []uint8) { copyRGB(dst, img.Pix[img.PixOffset(b.Min.X, b.Min.Y+y):], w) }
 	case *image.NRGBA:
 		return func(y int, dst []uint8) { copyRGB(dst, img.Pix[img.PixOffset(b.Min.X, b.Min.Y+y):], w) }
@@ -153,5 +157,21 @@ func copyRGB(dst, row []uint8, w int) {
 	for x := range len(dst) / rgbBytes {
 		i := min(x, w-1) * bpp
 		dst[x*rgbBytes], dst[x*rgbBytes+1], dst[x*rgbBytes+2] = row[i], row[i+1], row[i+2]
+	}
+}
+
+// copyRGBUnpremultiplied는 copyRGB와 같되 알파가 곱해진 색을 color.NRGBAModel과 같은 정수 계산으로 되돌린다.
+func copyRGBUnpremultiplied(dst, row []uint8, w int) {
+	const bpp, alphaIndex, widen, full16 = 4, 3, 0x101, 0xffff
+	for x := range len(dst) / rgbBytes {
+		i := min(x, w-1) * bpp
+		a := uint32(row[i+alphaIndex]) * widen
+		for c := range rgbBytes {
+			v := row[i+c]
+			if a != 0 && a != full16 {
+				v = uint8(uint32(v) * widen * full16 / a >> 8)
+			}
+			dst[x*rgbBytes+c] = v
+		}
 	}
 }

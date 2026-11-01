@@ -1,4 +1,4 @@
-// Package webpi는 순수 Go lossy WebP(VP8) 인코더다.
+// Package webpi는 순수 Go lossy WebP(VP8) 인코더다. 알파 채널은 VP8L 무손실로 압축해 함께 담는다.
 package webpi
 
 import (
@@ -41,7 +41,7 @@ type encoder struct {
 	skipProb uint8
 }
 
-// Encode는 m을 lossy WebP로 w에 쓴다. 알파는 버린다.
+// Encode는 m을 lossy WebP로 w에 쓴다. 알파가 있으면 VP8L 무손실로 압축해 함께 담는다.
 // 판단 PD-20261030-51b0e794: 최소 골격(i16·고정 양자화)부터, 적응 양자화·RD 결정은 그 위에 얹는다
 func Encode(w io.Writer, m image.Image, o *Options) error {
 	b := m.Bounds()
@@ -52,16 +52,32 @@ func Encode(w io.Writer, m image.Image, o *Options) error {
 	if o != nil {
 		quality = o.Quality
 	}
-	_, vp8, err := encodeFrame(m, quality)
+	alpha := alphaPlane(m)
+	if alpha == nil {
+		_, vp8, err := encodeFrame(m, nil, quality)
+		if err != nil {
+			return err
+		}
+		return writeRIFF(w, riffChunk{fourccVP8, vp8})
+	}
+	// 알파 압축은 VP8 인코딩과 독립이라 동시에 돌린다
+	alph := make(chan []byte, 1)
+	go func() { alph <- encodeAlpha(alpha, b.Dx(), b.Dy()) }()
+	_, vp8, err := encodeFrame(m, alpha, quality)
+	a := <-alph
 	if err != nil {
 		return err
 	}
-	return writeRIFF(w, vp8)
+	return writeRIFF(w, riffChunk{fourccVP8X, vp8xHeader(b.Dx(), b.Dy())}, riffChunk{fourccALPH, a}, riffChunk{fourccVP8, vp8})
 }
 
 // encodeFrame은 VP8 프레임을 만들고, 검증용으로 인코더 상태(복원 평면 포함)도 돌려준다.
-func encodeFrame(m image.Image, quality float32) (*encoder, []byte, error) {
+// alpha가 있으면 투명 영역의 색을 먼저 평탄하게 정리한다.
+func encodeFrame(m image.Image, alpha []uint8, quality float32) (*encoder, []byte, error) {
 	src := toYUV420(m)
+	if alpha != nil {
+		cleanupTransparent(src, alpha)
+	}
 	e := &encoder{src: src, seg: newSegmentation(src, quality), probs: defaultTokenProb}
 	e.rec = &yuvPlanes{w: e.src.w, h: e.src.h, mbw: e.src.mbw, mbh: e.src.mbh, ys: e.src.ys, cs: e.src.cs,
 		y: make([]uint8, len(e.src.y)), u: make([]uint8, len(e.src.u)), v: make([]uint8, len(e.src.v))}
@@ -225,22 +241,56 @@ func (e *encoder) writeSegmentID(h *boolEncoder, id uint8) {
 	}
 }
 
-func writeRIFF(w io.Writer, vp8 []byte) error {
-	pad := len(vp8) & 1
-	var hdr []byte
-	hdr = append(hdr, "RIFF"...)
-	hdr = binary.LittleEndian.AppendUint32(hdr, uint32(4+8+len(vp8)+pad))
-	hdr = append(hdr, "WEBPVP8 "...)
-	hdr = binary.LittleEndian.AppendUint32(hdr, uint32(len(vp8)))
-	if _, err := w.Write(hdr); err != nil {
-		return err
+// 컨테이너 청크 — WebP Container Specification
+const (
+	fourccVP8        = "VP8 "
+	fourccVP8X       = "VP8X"
+	fourccALPH       = "ALPH"
+	chunkHeaderSize  = 8
+	riffFormatSize   = 4
+	vp8xSize         = 10
+	vp8xAlphaFlag    = 0x10
+	vp8xFlagsBytes   = 4
+	canvasSizeBytes  = 3
+	canvasSizeOffset = vp8xFlagsBytes
+)
+
+type riffChunk struct {
+	fourcc string
+	data   []byte
+}
+
+// writeRIFF는 청크들을 RIFF/WEBP 컨테이너로 감싸 쓴다. 홀수 길이 청크 뒤에는 0 한 바이트를 붙인다.
+func writeRIFF(w io.Writer, chunks ...riffChunk) error {
+	size := riffFormatSize
+	for _, c := range chunks {
+		size += chunkHeaderSize + len(c.data) + len(c.data)&1
 	}
-	if _, err := w.Write(vp8); err != nil {
-		return err
+	out := make([]byte, 0, chunkHeaderSize+size)
+	out = append(out, "RIFF"...)
+	out = binary.LittleEndian.AppendUint32(out, uint32(size))
+	out = append(out, "WEBP"...)
+	for _, c := range chunks {
+		out = append(out, c.fourcc...)
+		out = binary.LittleEndian.AppendUint32(out, uint32(len(c.data)))
+		out = append(out, c.data...)
+		if len(c.data)&1 == 1 {
+			out = append(out, 0)
+		}
 	}
-	if pad == 1 {
-		_, err := w.Write([]byte{0})
-		return err
-	}
-	return nil
+	_, err := w.Write(out)
+	return err
+}
+
+// vp8xHeader는 알파 플래그와 캔버스 크기(각 24비트, 1을 뺀 값)를 담은 확장 헤더다.
+func vp8xHeader(w, h int) []byte {
+	d := make([]byte, vp8xSize)
+	d[0] = vp8xAlphaFlag
+	putUint24(d[canvasSizeOffset:], w-1)
+	putUint24(d[canvasSizeOffset+canvasSizeBytes:], h-1)
+	return d
+}
+
+func putUint24(b []byte, v int) {
+	b[0], b[1], b[2] = byte(v), byte(v>>8), byte(v>>16)
 }

@@ -125,12 +125,12 @@ func Test_encodeFrame_dwebpUnfilteredYUV_matchesReconstructionExactly(t *testing
 	}
 	for _, q := range []float32{5, 50, 75, 100} {
 		src := syntheticImage(99, 67)
-		e, vp8, err := encodeFrame(src, q)
+		e, vp8, err := encodeFrame(src, nil, q)
 		if err != nil {
 			t.Fatal(err)
 		}
 		var buf bytes.Buffer
-		if err := writeRIFF(&buf, vp8); err != nil {
+		if err := writeRIFF(&buf, riffChunk{fourccVP8, vp8}); err != nil {
 			t.Fatal(err)
 		}
 		got := dwebpYUV(t, buf.Bytes())
