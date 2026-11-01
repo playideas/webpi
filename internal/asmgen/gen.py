@@ -309,7 +309,13 @@ KERNELS = [
 
 
 def emit() -> str:
-    out = ["// 생성 파일 — internal/asmgen/gen.py로 만든다. 직접 고치지 않는다.", "", '#include "textflag.h"']
+    out = [
+        "// 생성 파일 — internal/asmgen/gen.py로 만든다. 직접 고치지 않는다.",
+        "",
+        "//go:build !purego",
+        "",
+        '#include "textflag.h"',
+    ]
     for name, decl, args, body_fn in KERNELS:
         body = body_fn()
         words = assemble(body)

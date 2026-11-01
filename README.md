@@ -1,6 +1,8 @@
 # webpi
 
-순수 Go(cgo 없음) lossy WebP 인코더. 목표는 **libwebp와 같은 압축 효율**이다.
+cgo 없는 Go lossy WebP 인코더. 목표는 **libwebp와 같은 압축 효율**이다.
+arm64에서는 NEON 어셈블리 커널을 기본으로 쓰고, `go build -tags purego`면 모든 아키텍처에서 순수 Go로 빌드된다.
+두 빌드의 출력은 바이트 단위로 같다.
 
 ## 왜 만드나
 
@@ -102,13 +104,13 @@ webpi가 두 deepteams 설정 모두를 네 지표·두 측정 방식 전부에�
 
 ### 속도
 
-| | 시작 | 지금 | deepteams 기본값 |
-|---|---|---|---|
-| 코어 하나(`GOMAXPROCS=1`), 640×480 장당 q75 | ~50ms | ~43.7ms | ~47.6ms |
-| 모든 코어에 동시(처리량), 장당 q75 | 3.91ms | ~3.4ms | ~3.4ms |
+| | 시작 | 순수 Go (`-tags purego`) | arm64 NEON (기본) | deepteams 기본값 |
+|---|---|---|---|---|
+| 코어 하나(`GOMAXPROCS=1`), 640×480 장당 q75 | ~50ms | ~43.7ms | ~36.5ms | ~47.6ms |
+| 모든 코어에 동시(처리량), 장당 q75 | 3.91ms | ~3.4ms | ~2.9ms | ~3.4ms |
 
 (`cd bench && WEBPI_BENCH_DIR=<jpg 디렉터리> go test -bench 'encode'`의 `encode_*`·`encodeParallel_*`.
-다른 작업이 도는 머신이라 두 인코더를 번갈아 돌려 같은 시간대의 비율로 비교했다. 동시 처리량은 비율 0.96~1.05로 동률 범위)
+다른 작업이 도는 머신이라 두 인코더를 번갈아 돌려 같은 시간대의 비율로 비교했다. 순수 Go의 동시 처리량은 비율 0.96~1.05로 동률 범위, NEON은 코어 하나 0.77·동시 0.81~0.88)
 - 비용 표: 토큰 트리를 따라가는 대신 libwebp식 레벨 비용 표로 RD 비트 수를 낸다
 - 매크로블록 행을 대각선 물결로 동시에 인코딩한다. 순차 인코딩과 바이트 단위로 같다 (`Test_Encode_parallelRows_matchesSingleThreadBytes`).
   deepteams는 스레드 수에 따라 출력이 달라진다
@@ -118,4 +120,7 @@ webpi가 두 deepteams 설정 모두를 네 지표·두 측정 방식 전부에�
   SSE 기준 상위 5개 0.50%, SATD/q 기준 0.20%. 전체 지표 손실은 0.1~0.2%다
 - 행 결과는 모드 헤더만 프레임 배열에 두고 계수는 행별 int16 버퍼에 마지막 0 아닌 계수까지만 쌓는다.
   RGB 행·토큰 통계는 작업자별로 한 벌 — 인코딩당 할당 3.6MB·1125회 → 2.1MB·226회
-- 어셈블리 없이 순수 Go다. deepteams는 arm64에서 예측·SSE·역 DCT가 NEON 어셈블리다
+- arm64 NEON 커널 두 개: 4×4 블록 처리(잔차→DCT→양자화→역양자화→역 DCT→복원→SSE를 한 번에)와 i4 후보 순위용 SATD.
+  Go 어셈블러에 정수 NEON 명령이 없어 `internal/asmgen/gen.py`가 clang으로 어셈블한 기계어를 `WORD`로 넣은
+  `kernels_arm64.s`를 만든다(생성 파일을 커밋하므로 빌드에는 clang이 필요 없다). Go 구현과의 비트 일치는
+  `go test ./...`의 무작위 대조 테스트로 확인한다. deepteams는 arm64에서 예측·SSE·역 DCT가 NEON 어셈블리다

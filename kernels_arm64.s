@@ -1,5 +1,7 @@
 // 생성 파일 — internal/asmgen/gen.py로 만든다. 직접 고치지 않는다.
 
+//go:build !purego
+
 #include "textflag.h"
 
 // func quantBlock4(src *uint8, stride int, pred *[16]uint8, qv *quantVecs, levels *[16]int16, rec *[16]uint8) uint32

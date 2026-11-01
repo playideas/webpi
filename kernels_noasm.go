@@ -1,4 +1,6 @@
-//go:build !arm64
+//go:build !arm64 || purego
+
+// 순수 Go 커널 — arm64가 아니거나 purego 태그로 빌드할 때 쓴다.
 
 package webpi
 
