@@ -1,0 +1,24 @@
+images=150 scale=0.75 jobs=16
+target ssim=0.9728
+libwebp        q=40  avgKB=  13.74  ssim=0.9314  encMs=  74.3
+libwebp        q=50  avgKB=  15.82  ssim=0.9418  encMs=  76.0
+libwebp        q=60  avgKB=  17.90  ssim=0.9500  encMs=  75.4
+libwebp        q=70  avgKB=  20.23  ssim=0.9575  encMs=  77.0
+libwebp        q=75  avgKB=  21.52  ssim=0.9608  encMs=  76.1
+libwebp        q=80  avgKB=  26.22  ssim=0.9705  encMs=  78.3
+libwebp        q=85  avgKB=  32.42  ssim=0.9789  encMs=  75.6
+libwebp        q=90  avgKB=  42.35  ssim=0.9868  encMs=  75.6
+libwebp        q=95  avgKB=  59.61  ssim=0.9931  encMs=  74.1
+webpi          q=40  avgKB=  15.87  ssim=0.9221  encMs=  28.9
+webpi          q=50  avgKB=  18.20  ssim=0.9340  encMs=  30.0
+webpi          q=60  avgKB=  20.48  ssim=0.9436  encMs=  30.2
+webpi          q=70  avgKB=  23.05  ssim=0.9522  encMs=  31.7
+webpi          q=75  avgKB=  24.48  ssim=0.9562  encMs=  27.4
+webpi          q=80  avgKB=  29.57  ssim=0.9672  encMs=  27.6
+webpi          q=85  avgKB=  36.36  ssim=0.9768  encMs=  28.2
+webpi          q=90  avgKB=  46.39  ssim=0.9850  encMs=  28.7
+webpi          q=95  avgKB=  63.53  ssim=0.9918  encMs=  28.3
+
+== ssim 0.9728 에서의 크기 ==
+libwebp          27.79KB  vs libwebp  +0.0%
+webpi            33.30KB  vs libwebp +19.8%

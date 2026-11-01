@@ -1,0 +1,34 @@
+images=150 scale=0.75 jobs=16
+target ssim=0.9728
+jpeg           q=40  avgKB=  16.84  ssim=0.9209  encMs=   4.2
+jpeg           q=50  avgKB=  19.37  ssim=0.9329  encMs=   3.5
+jpeg           q=60  avgKB=  22.12  ssim=0.9423  encMs=   3.7
+jpeg           q=70  avgKB=  26.34  ssim=0.9524  encMs=   3.8
+jpeg           q=75  avgKB=  29.03  ssim=0.9587  encMs=   3.9
+jpeg           q=80  avgKB=  33.21  ssim=0.9654  encMs=   3.9
+jpeg           q=85  avgKB=  39.09  ssim=0.9728  encMs=   4.2
+jpeg           q=90  avgKB=  49.25  ssim=0.9811  encMs=   4.7
+jpeg           q=95  avgKB=  70.97  ssim=0.9905  encMs=   5.3
+libwebp        q=40  avgKB=  13.74  ssim=0.9314  encMs=  94.6
+libwebp        q=50  avgKB=  15.82  ssim=0.9418  encMs=  98.6
+libwebp        q=60  avgKB=  17.90  ssim=0.9500  encMs=  95.8
+libwebp        q=70  avgKB=  20.23  ssim=0.9575  encMs= 110.9
+libwebp        q=75  avgKB=  21.52  ssim=0.9608  encMs= 112.4
+libwebp        q=80  avgKB=  26.22  ssim=0.9705  encMs= 109.4
+libwebp        q=85  avgKB=  32.42  ssim=0.9789  encMs= 109.7
+libwebp        q=90  avgKB=  42.35  ssim=0.9868  encMs= 104.8
+libwebp        q=95  avgKB=  59.61  ssim=0.9931  encMs= 106.7
+deepteams      q=40  avgKB=  13.52  ssim=0.9011  encMs=  46.3
+deepteams      q=50  avgKB=  15.23  ssim=0.9168  encMs=  52.6
+deepteams      q=60  avgKB=  17.20  ssim=0.9281  encMs=  49.7
+deepteams      q=70  avgKB=  19.67  ssim=0.9403  encMs=  57.9
+deepteams      q=75  avgKB=  20.72  ssim=0.9436  encMs=  61.0
+deepteams      q=80  avgKB=  25.91  ssim=0.9588  encMs=  56.2
+deepteams      q=85  avgKB=  31.21  ssim=0.9688  encMs=  60.7
+deepteams      q=90  avgKB=  39.51  ssim=0.9797  encMs=  71.4
+deepteams      q=95  avgKB=  55.20  ssim=0.9903  encMs=  72.6
+
+== ssim 0.9728 에서의 크기 ==
+jpeg             39.09KB  vs libwebp +40.7%
+libwebp          27.79KB  vs libwebp  +0.0%
+deepteams        34.00KB  vs libwebp +22.3%

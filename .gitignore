@@ -1,0 +1,8 @@
+# 빌드 산출물
+bench/bench
+
+# OS
+.DS_Store
+
+# 테스트 바이너리
+*.test
