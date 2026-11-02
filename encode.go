@@ -79,8 +79,13 @@ func Encode(w io.Writer, m image.Image, o *Options) (err error) {
 	}
 	// 알파 압축은 VP8 인코딩과 독립이라 동시에 돌린다
 	alph := startAlpha(func() []byte { return encodeAlpha(alpha, b.Dx(), b.Dy()) })
-	_, vp8, err := encodeFrame(m, alpha, quality)
-	a := <-alph
+	var vp8 []byte
+	var a alphaResult
+	func() {
+		// VP8 쪽이 패닉으로 끝나도 알파 고루틴을 기다린다 — Encode가 돌아온 뒤 계산이 뒤에서 이어지지 않게
+		defer func() { a = <-alph }()
+		_, vp8, err = encodeFrame(m, alpha, quality)
+	}()
 	if err != nil {
 		return err
 	}

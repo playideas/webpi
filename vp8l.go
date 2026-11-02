@@ -31,6 +31,7 @@ const (
 	lzMaxChain    = 48
 	// 접두 값 부호화: 0~3은 그대로, 그 위는 (2·최상위 비트 + 다음 비트)와 추가 비트
 	prefixDirect = 4
+	byteBits     = 8
 )
 
 // planeTable은 거리 부호 1~120의 (y, 8−x) 오프셋이다 (명세의 distance map, 가까운 순).
@@ -130,16 +131,74 @@ func writeTokens(w *bitWriter, toks []lzToken, codes *[numPrefixCodes]prefixCode
 // 주 이미지는 메타 접두 부호 여부 비트가 하나 더 있다 (변환의 부속 이미지에는 없다).
 func writeEntropyImage(w *bitWriter, argb []uint32, width int, main bool) {
 	toks := lz77(argb, width)
-	h := tokenHistograms(toks)
+	// 값 분포가 치우친 잡음에서는 짧은 일치가 흔한 값의 리터럴을 빼앗아 리터럴만 쓰는 쪽보다 커진다 —
+	// 비용 모델이 탐욕 분할에서 출발해 빠져나오지 못한다. 실제 비트 수로 둘을 비교해 작은 쪽을 쓴다
+	if literalBits(argb) < codedBits(toks) {
+		toks = literalTokens(argb)
+	}
 	// 색 캐시 없음
 	w.put(0, 1)
 	if main {
 		// 메타 접두 부호 없음 — 이미지 전체가 부호 한 벌
 		w.put(0, 1)
 	}
+	writeCodedTokens(w, toks)
+}
+
+// writeCodedTokens는 토큰의 접두 부호 다섯 개와 토큰을 쓴다.
+func writeCodedTokens(w *bitWriter, toks []lzToken) {
+	h := tokenHistograms(toks)
 	var codes [numPrefixCodes]prefixCode
 	for i := range h {
 		codes[i] = writePrefixCode(w, h[i])
 	}
 	writeTokens(w, toks, &codes)
+}
+
+// codedBits는 writeCodedTokens가 쓸 비트 수다. 부호 헤더만 버리는 쓰기로 재고, 토큰은 빈도와 부호 길이로 센다.
+func codedBits(toks []lzToken) int {
+	n := histogramBits(tokenHistograms(toks))
+	for _, t := range toks {
+		if t.length > 0 {
+			_, lnb, _ := prefixEncode(int(t.length))
+			_, dnb, _ := prefixEncode(int(t.dist))
+			n += int(lnb + dnb)
+		}
+	}
+	return n
+}
+
+// literalBits는 모든 픽셀을 리터럴로 쓸 때의 비트 수다 (토큰 열을 만들지 않고 센다).
+func literalBits(argb []uint32) int {
+	h := tokenHistograms(nil)
+	for _, c := range argb {
+		a, r, g, b := argbBytes(c)
+		h[codeGreen][g]++
+		h[codeRed][r]++
+		h[codeBlue][b]++
+		h[codeAlpha][a]++
+	}
+	return histogramBits(h)
+}
+
+// histogramBits는 빈도 h로 만든 접두 부호 다섯 개의 헤더와 기호들의 비트 수다 (추가 비트 제외).
+func histogramBits(h [numPrefixCodes][]uint32) int {
+	var w bitWriter
+	n := 0
+	for _, counts := range h {
+		c := writePrefixCode(&w, counts)
+		for s, k := range counts {
+			n += int(k) * int(c.lengths[s])
+		}
+	}
+	return n + len(w.buf)*byteBits + int(w.n)
+}
+
+// literalTokens는 모든 픽셀을 리터럴로 둔 토큰 열이다.
+func literalTokens(argb []uint32) []lzToken {
+	toks := make([]lzToken, len(argb))
+	for i, c := range argb {
+		toks[i].argb = c
+	}
+	return toks
 }
