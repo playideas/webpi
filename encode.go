@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"image"
 	"io"
+	"math/bits"
 )
 
 // 프레임 제약 — RFC 6386 9.1, 19.1
@@ -65,6 +66,9 @@ func Encode(w io.Writer, m image.Image, o *Options) (err error) {
 	if quality != quality {
 		return errors.New("webpi: 품질이 NaN")
 	}
+	// 품질에서 갈라지는 모든 값이 같은 범위를 보도록 입구에서 한 번 자른다. -Inf 같은 값이 그대로 내려가면
+	// 정수 변환이 넘쳐 헤더와 실제 양자화가 어긋난다
+	quality = min(max(quality, 0), maxQuality)
 	alpha := alphaPlane(m)
 	if alpha == nil {
 		_, vp8, err := encodeFrame(m, nil, quality)
@@ -113,17 +117,28 @@ func encodeFrame(m image.Image, alpha []uint8, quality float32) (*encoder, []byt
 		cleanupTransparent(src, alpha)
 	}
 	// 첫 파티션(모드 헤더)이 규격 한도를 넘으면 libwebp처럼 i4 헤더 예산을 반으로 줄여 처음부터 다시
-	// 인코딩한다. 높은 품질의 큰 사진은 i4를 많이 골라 넘치기 쉽다. 예산이 0(i4 없음)인데도 넘치면 오류다.
+	// 인코딩한다. 높은 품질의 큰 사진은 i4를 많이 골라 넘치기 쉽다. i4를 하나도 고르지 않았는데도 넘치면
+	// 예산을 더 줄여도 같은 결과라 오류다.
 	// 판단 PD-20261101-6d62647f: 첫 파티션이 넘치면 오류 대신 i4 예산을 줄여 다시 인코딩한다
 	for budget := int64(i4HeaderBudget); ; budget >>= 1 {
 		e := newEncoder(src, quality)
 		e.i4Budget = budget
 		stats := e.encodeRows()
 		vp8, err := e.bitstream(stats)
-		if !errors.Is(err, errFirstPartitionOverflow) || budget == 0 {
+		if !errors.Is(err, errFirstPartitionOverflow) || budget == 0 || !e.usesI4() {
 			return e, vp8, err
 		}
 	}
+}
+
+// usesI4는 i4 매크로블록이 하나라도 있는지 알려 준다.
+func (e *encoder) usesI4() bool {
+	for i := range e.mbs {
+		if e.mbs[i].i4 {
+			return true
+		}
+	}
+	return false
 }
 
 // errFirstPartitionOverflow는 첫 파티션이 프레임 태그의 19비트 크기 필드를 넘는다는 뜻이다.
@@ -221,7 +236,7 @@ func (e *encoder) bitstreamFrom(stats *tokenStats, minPartsLog2 int) ([]byte, er
 	e.chooseSkipProb()
 	// 헤더를 쓰면 토큰 확률이 갱신되므로 파티션 수를 바꿔 다시 쓸 때는 처음 확률에서 시작한다
 	baseProbs := e.probs
-	for partsLog2 := minPartsLog2; partsLog2 <= maxPartsLog2; partsLog2++ {
+	for partsLog2 := minPartsLog2; partsLog2 <= maxPartsLog2; {
 		e.probs = baseProbs
 		hdr := newBoolEncoder()
 		e.writeHeader(hdr, stats, partsLog2)
@@ -230,28 +245,39 @@ func (e *encoder) bitstreamFrom(stats *tokenStats, minPartsLog2 int) ([]byte, er
 		if len(first) > maxFirstPartSize {
 			return nil, errFirstPartitionOverflow
 		}
-		if parts := e.tokenPartitions(1 << partsLog2); parts != nil {
+		parts, rows := e.tokenPartitions(1 << partsLog2)
+		if parts != nil {
 			return e.assembleFrame(first, parts), nil
 		}
+		partsLog2 = max(partsLog2+1, neededPartsLog2(1<<partsLog2, rows, e.src.mbh))
 	}
 	return nil, errTokenPartitionOverflow
 }
 
+// neededPartsLog2는 n개 파티션이 rows행만에 넘쳤을 때 필요한 파티션 수의 log2를 어림한다. 넘친 파티션은
+// 약 rows/n행으로 한도를 채웠으니, 행 크기가 고르다면 전체는 한도의 n·mbh/rows배다.
+func neededPartsLog2(n, rows, mbh int) int {
+	need := (n*mbh + rows - 1) / rows
+	return bits.Len(uint(need - 1))
+}
+
 // tokenPartitions는 토큰을 n개 파티션에 나눠 쓴다 (매크로블록 행 y는 파티션 y mod n, RFC 6386 9.5).
-// 한 파티션이라도 maxTokenPartSize 이상이면 nil이다.
-func (e *encoder) tokenPartitions(n int) [][]byte {
+// 한 파티션이라도 maxTokenPartSize 이상이 되면 그 행에서 멈추고 nil과 쓴 행 수를 돌려준다.
+func (e *encoder) tokenPartitions(n int) ([][]byte, int) {
 	ws := make([]*tokenWriter, n)
 	for i := range ws {
 		ws[i] = &tokenWriter{enc: newBoolEncoder(), probs: &e.probs}
 	}
-	e.writeTokens(ws)
+	if rows := e.writeTokens(ws); rows < e.src.mbh {
+		return nil, rows
+	}
 	parts := make([][]byte, n)
 	for i, w := range ws {
 		if parts[i] = w.enc.finish(); len(parts[i]) >= maxTokenPartSize {
-			return nil
+			return nil, e.src.mbh
 		}
 	}
-	return parts
+	return parts, e.src.mbh
 }
 
 // assembleFrame은 프레임 태그·시작 코드·크기, 첫 파티션, 토큰 파티션 크기 표(마지막 제외)와 파티션들을 잇는다.
@@ -316,8 +342,12 @@ func (e *encoder) writeHeader(h *boolEncoder, stats *tokenStats, partsLog2 int) 
 }
 
 // writeSegmentHeader는 세그먼트 사용, 세그먼트별 절대 양자화 인덱스, id 트리 확률을 쓴다 (RFC 6386 9.3).
+// 세그먼트가 하나뿐이면 세그먼트를 끈다 — 디코더는 프레임 레벨의 양자화 인덱스·필터 레벨(세그먼트 0의 값)을 쓴다.
 func (e *encoder) writeSegmentHeader(h *boolEncoder) {
-	h.putBit(uniformProb, true) // 세그먼트 사용
+	h.putBit(uniformProb, e.seg.distinct > 1) // 세그먼트 사용
+	if e.seg.distinct <= 1 {
+		return
+	}
 	h.putBit(uniformProb, true) // 매크로블록 세그먼트 맵 갱신
 	h.putBit(uniformProb, true) // 세그먼트 값 갱신
 	h.putBit(uniformProb, true) // 절대값 모드

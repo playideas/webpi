@@ -16,7 +16,8 @@ type nzContext [9]int
 const nzY2 = 8
 
 // writeTokens는 모든 매크로블록의 계수 토큰을 래스터 순서로 파티션 ws에 나눠 쓴다 (문맥은 디코더와 같게 유지).
-func (e *encoder) writeTokens(ws []*tokenWriter) {
+// 어느 파티션이든 maxTokenPartSize에 이르면 그 행까지만 쓰고 쓴 행 수를 돌려준다 (다 쓰면 행 수 전체).
+func (e *encoder) writeTokens(ws []*tokenWriter) int {
 	top := make([]nzContext, e.src.mbw)
 	var mb mbInfo
 	for mby := range e.src.mbh {
@@ -35,7 +36,12 @@ func (e *encoder) writeTokens(ws []*tokenWriter) {
 			writeLumaTokens(w, &mb, &top[mbx], &left)
 			writeChromaTokens(w, &mb, &top[mbx], &left)
 		}
+		// 끝나지 않은 출력만으로 이미 한도면 마무리해도 넘친다 — 나머지를 쓸 필요가 없다
+		if len(w.enc.out) >= maxTokenPartSize {
+			return mby + 1
+		}
 	}
+	return e.src.mbh
 }
 
 // skipContext는 건너뛴 매크로블록의 문맥을 비운다. Y2가 없는 i4 블록은 Y2 문맥을 그대로 둔다.

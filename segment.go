@@ -46,8 +46,10 @@ type segmentation struct {
 	quant  [nSegments]quantizer
 	probs  [nSegments - 1]uint8 // 세그먼트 id 트리 확률
 	filter [nSegments]int       // 세그먼트별 루프 필터 레벨
-	dqUVDC int
-	dqUVAC int
+	// 병합 뒤 남은 서로 다른 세그먼트 수. 1이면 세그먼트를 끄고 매크로블록별 id도 쓰지 않는다
+	distinct int
+	dqUVDC   int
+	dqUVAC   int
 }
 
 // newSegmentation은 민감도 분석으로 세그먼트를 나누고, 평탄한 세그먼트일수록 작은 양자화 인덱스를 준다.
@@ -66,8 +68,33 @@ func newSegmentation(src *yuvPlanes, quality float32) segmentation {
 		s.quant[n] = newQuantizer(int(maxQIndex*(1-c)), s.dqUVDC, s.dqUVAC)
 		s.filter[n] = filterLevel(s.quant[n].qi, segBeta[n])
 	}
+	s.mergeDuplicates()
 	s.probs = segmentProbs(ids)
 	return s
+}
+
+// mergeDuplicates는 양자화 인덱스와 필터 레벨이 같은 세그먼트를 앞쪽 세그먼트로 합친다 (libwebp
+// SimplifySegments). 높은 품질에서는 세그먼트 인덱스가 0에 몰려 같아지는데, 따로 두면 매크로블록마다
+// 정보 없는 id 비트를 쓴다. 합친 세그먼트는 확률 255로 거의 공짜가 되고, 하나만 남으면 맵 자체를 뺀다.
+// qi가 같으면 색차 델타도 프레임 공통이라 양자화기와 λ가 같아 인코딩 결정은 그대로다.
+func (s *segmentation) mergeDuplicates() {
+	var remap [nSegments]uint8
+	s.distinct = 0
+	for n := range nSegments {
+		remap[n] = uint8(n)
+		for m := range n {
+			if remap[m] == uint8(m) && s.quant[m].qi == s.quant[n].qi && s.filter[m] == s.filter[n] {
+				remap[n] = uint8(m)
+				break
+			}
+		}
+		if remap[n] == uint8(n) {
+			s.distinct++
+		}
+	}
+	for i, id := range s.ids {
+		s.ids[i] = remap[id]
+	}
 }
 
 // uvACBiasAt은 품질 quality에서의 색차 AC 편향이다: q95 이상 0, q85 초과 −1, q75 초과 −2, 그 아래 uvACBias.

@@ -100,7 +100,9 @@ func (e *encoder) writeModes(h *boolEncoder) {
 		if mbx == 0 {
 			ctx.left = [4]uint8{}
 		}
-		e.writeSegmentID(h, e.seg.ids[i])
+		if e.seg.distinct > 1 {
+			e.writeSegmentID(h, e.seg.ids[i])
+		}
 		if e.useSkip {
 			h.putBit(e.skipProb, mb.skip)
 		}
