@@ -48,8 +48,8 @@ type segmentation struct {
 	filter [nSegments]int       // 세그먼트별 루프 필터 레벨
 	// 병합 뒤 남은 서로 다른 세그먼트 수. 1이면 세그먼트를 끄고 매크로블록별 id도 쓰지 않는다
 	distinct int
-	dqUVDC int
-	dqUVAC int
+	dqUVDC   int
+	dqUVAC   int
 }
 
 // newSegmentation은 민감도 분석으로 세그먼트를 나누고, 평탄한 세그먼트일수록 작은 양자화 인덱스를 준다.
