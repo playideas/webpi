@@ -33,6 +33,14 @@ var alphaPatterns = []alphaPattern{
 	{"levels17", func(x, y, _, _ int, _ *rand.Rand) uint8 { return uint8(15 * ((x*7 + y*3) % 17)) }},
 	{"transparent", func(_, _, _, _ int, _ *rand.Rand) uint8 { return 0 }},
 	{"onehole", func(x, y, _, _ int, _ *rand.Rand) uint8 { return uint8(255 - 255*b2u(x == 1 && y == 0)) }},
+	// 값 분포가 치우친 잡음 — LZ77보다 리터럴만 쓰는 쪽이 작다
+	{"skewed", func(_, _, _, _ int, r *rand.Rand) uint8 { return uint8(255 - min(int(r.ExpFloat64()*2), 255)) }},
+	// 경계가 17단계로 부드러운 원 — 엔트로피로 고른 필터보다 필터 없음이 작다
+	{"softdisc", func(x, y, w, h int, _ *rand.Rand) uint8 {
+		dx, dy := 2*x-w, 2*y-h
+		d := dx*dx + dy*dy - w*h/2
+		return uint8(15 * min(max(8-d/max(w, 1), 0), 17))
+	}},
 }
 
 func b2u(b bool) int {
